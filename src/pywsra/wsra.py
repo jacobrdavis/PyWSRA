@@ -9,11 +9,17 @@ __all__ = [
 ]
 
 from typing import Hashable, Tuple
+from urllib.error import URLError
 
+import cartopy
+import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-from .ibtracs import get_storm_track
 
+from matplotlib.axes import Axes
+from .best_track import BestTrack
+from .chart import WsraChart
+from .operations import rotate_xy
 
 @xr.register_dataset_accessor("wsra")
 class WsraDatasetAccessor:
@@ -22,9 +28,12 @@ class WsraDatasetAccessor:
     #TODO: document specific additions:
 
     """
-    def __init__(self, xarray_obj):
+    def __init__(self, xarray_obj) -> xr.Dataset:
         self._obj = xarray_obj
         self._center = None
+        self._best_track = None
+        self._chart = None
+        #ˇTODO: save filenames as attrs?
 
     @property
     def center(self):
@@ -37,22 +46,27 @@ class WsraDatasetAccessor:
             self._center = (float(lon.mean()), float(lat.mean()))
         return self._center
 
-    def _rotate_xy(self, x: np.array, y: np.array, theta: np.array) -> Tuple:
-        """
-        Perform 2D coordinate rotation of points (x, y).
+    #TODO:
+    @property
+    def best_track(self):
+        #TODO: replace
+        if self._best_track is None:
+            try:
+                storm_name = self._obj.attrs['storm_id']
+            except AttributeError as e:
+                #TODO: raise or try from filename?
+                print('{e}, please set the `storm_id` attr of the dataset and try again.')
+            except URLError as e:
+                print('{e}, unable to load the best track database.')
+            self._best_track = BestTrack(storm_name)
 
-        Args:
-            x (np.array): x coordinate to rotate
-            y (np.array): y coordinate to rotate
-            theta (np.array): rotation angles in [rad]
+        return self._best_track
 
-        Returns:
-            Tuple[np.array, np.array]: rotated x and y coordinates
-        """
-        x_rot = x*np.cos(theta) - y*np.sin(theta)
-        y_rot = x*np.sin(theta) + y*np.cos(theta)
-
-        return x_rot, y_rot
+    @property
+    def chart(self):
+        if self._chart is None:
+            self._chart = WsraChart(self._obj)
+        return self._chart
 
     def to_storm_coord(self) -> None:
         """
@@ -77,9 +91,9 @@ class WsraDatasetAccessor:
         y_eye = self._obj[Y_VAR_NAME].values
         x_eye = self._obj[X_VAR_NAME].values
 
-        best_track = get_storm_track(storm_name=self._obj.attrs['storm_id'])
-        storm_datetime = best_track.index
-        storm_direction = best_track['STORM_DIR']
+        # best_track = get_storm_track(storm_name=self._obj.attrs['storm_id'])
+        storm_datetime = self.best_track.index
+        storm_direction = self.best_track['STORM_DIR']
         wsra_datetime = self._obj['time'].values
 
         interp_storm_direction = np.interp(wsra_datetime.astype("float"),
@@ -87,7 +101,7 @@ class WsraDatasetAccessor:
                                            storm_direction.astype("float"))
 
         theta = np.deg2rad(interp_storm_direction)
-        x_eye_rot, y_eye_rot = self._rotate_xy(x_eye, y_eye, theta)
+        x_eye_rot, y_eye_rot = rotate_xy(x_eye, y_eye, theta)
 
         self._obj[X_VAR_NAME + '_storm_coord'] = (('trajectory'), x_eye_rot)
         self._obj[Y_VAR_NAME + '_storm_coord'] = (('trajectory'), y_eye_rot)
@@ -102,8 +116,8 @@ class WsraDatasetAccessor:
         self,
         mask_dict=None,
         roll_limit=None,
-        altitude_limit=None,
-        speed_limit=None,
+        altitude_limits=None,
+        speed_limits=None,
     ):
         #TODO: document
 
@@ -111,10 +125,10 @@ class WsraDatasetAccessor:
             mask_dict = {}
             if roll_limit:
                 mask_dict['wsra_computed_roll'] = (-1*roll_limit, roll_limit)
-            if altitude_limit:
-                mask_dict['platform_radar_altitude'] = (0, altitude_limit)
-            if speed_limit:
-                mask_dict['platform_speed_wrt_ground'] = (0, speed_limit)
+            if altitude_limits:
+                mask_dict['platform_radar_altitude'] = altitude_limits
+            if speed_limits:
+                mask_dict['platform_speed_wrt_ground'] = speed_limits
 
         masks = []
         for variable, bounds in mask_dict.items():
@@ -135,6 +149,46 @@ class WsraDatasetAccessor:
             attr_name = variable + '_bounds'
             self._obj['trajectory_mask'].attrs[attr_name] = bounds
 
+    def mask(self, dim=0, **kwargs) -> xr.Dataset:
+        """Filter elements from this object according to a prestablished
+        dimension mask.
+
+        See xarray.Dataset.where.
+
+        Args:
+            dim (int, optional): index of `dims` along which the mask is
+                defined. Defaults to 0.
+            kwargs (optional): Additional keyword arguments for Dataset.where
+
+        Returns:
+            xr.Dataset: original Dataset masked along a dimension
+        """
+        try:
+            dim_names = list(self._obj.dims.keys())
+            mask = dim_names[dim] + '_mask'
+            return self._obj.where(self._obj.coords[mask], **kwargs)
+        except KeyError as error:
+            print(f"Mask {error} does not exist in coordinates.\n"
+                  f"To create a mask, use the: "
+                  f"`<Dataset>.wsra.create_<dim>_mask(...)`method.")
+            return self._obj
+
+    def plot(
+        self,
+        ax=None,
+        extent=None,
+        **plt_kwargs
+    ) -> Axes:
+        if ax is None:
+            fig = plt.gcf()  # = plt.figure(figsize=(5, 5))
+            proj = cartopy.crs.PlateCarree()
+            ax = fig.add_subplot(1, 1, 1, projection=proj)
+
+        self.chart.extent = extent
+        self.chart.plot(ax, **plt_kwargs)
+        return ax
+
+
 
 @xr.register_dataarray_accessor("wsra")
 class WsraDataArrayAccessor:
@@ -148,25 +202,23 @@ class WsraDataArrayAccessor:
         self._obj = xarray_obj
         self._center = None
 
-    def mask(self, dim=0) -> xr.DataArray:
+    def mask(self, dim=0, **kwargs) -> xr.DataArray:
         """Filter elements from this object according to a prestablished
         dimension mask.
+
+        See xarray.DataArray.where.
 
         Args:
             dim (int, optional): index of `dims` along which the mask is
                 defined. Defaults to 0.
+            kwargs (optional): Additional keyword arguments for DataArray.where
 
         Returns:
             xr.DataArray: original DataArray masked along a dimension
         """
         try:
             mask = self._obj.dims[dim] + '_mask'
-            return self._obj.where(self._obj.coords[mask])
-        except AttributeError as error:
-            print(f"{error}.\n"
-                  f"To create a mask, use the: "
-                  f"`<Dataset>.wsra.create_<dim>_mask(...)` method.")
-            return self._obj
+            return self._obj.where(self._obj.coords[mask], **kwargs)
         except KeyError as error:
             print(f"Mask {error} does not exist in coordinates.\n"
                   f"To create a mask, use the: "
