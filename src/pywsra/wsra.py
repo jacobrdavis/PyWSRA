@@ -18,8 +18,9 @@ import xarray as xr
 
 from matplotlib.axes import Axes
 from .best_track import BestTrack
-from .chart import WsraChart
-from .operations import rotate_xy
+from .plot import WsraChart
+from .operations import rotate_xy, calculate_mean_spectral_area
+
 
 @xr.register_dataset_accessor("wsra")
 class WsraDatasetAccessor:
@@ -33,7 +34,20 @@ class WsraDatasetAccessor:
         self._center = None
         self._best_track = None
         self._chart = None
+        self._trajectory_dim = None
+        # self._mean_spectral_area = None
         #ˇTODO: save filenames as attrs?
+
+    @property
+    def trajectory_dim(self):  # TODO: this will break when dims are cycled
+        if self._trajectory_dim is None:
+            dim_names = list(self._obj.dims.keys())
+            self._trajectory_dim = dim_names[0]
+        return self._trajectory_dim
+
+    @trajectory_dim.setter
+    def trajectory_dim(self, value):
+        self._trajectory_dim = value
 
     @property
     def center(self):
@@ -45,6 +59,20 @@ class WsraDatasetAccessor:
             lat = self._obj.longitude
             self._center = (float(lon.mean()), float(lat.mean()))
         return self._center
+    
+    # @property
+    # def mean_spectral_area(self):
+    #     """Return the mean spectral area.
+        
+    #     Return spectral area (rad^2/m^2) as the mean area of all
+    #     spectral squares formed by the wavenumber arrays.
+    #     """
+    #     if self._mean_spectral_area is None:
+
+    #         self._mean_spectral_area = calculate_mean_spectral_area(self._obj['wavenumber_east'].values,
+    #                                      self._obj['wavenumber_north'].values)
+
+    #     return self._mean_spectral_area
 
     #TODO:
     @property
@@ -92,8 +120,8 @@ class WsraDatasetAccessor:
         x_eye = self._obj[X_VAR_NAME].values
 
         # best_track = get_storm_track(storm_name=self._obj.attrs['storm_id'])
-        storm_datetime = self.best_track.index
-        storm_direction = self.best_track['STORM_DIR']
+        storm_datetime = self.best_track.df.index
+        storm_direction = self.best_track.df['STORM_DIR']
         wsra_datetime = self._obj['time'].values
 
         interp_storm_direction = np.interp(wsra_datetime.astype("float"),
@@ -103,8 +131,8 @@ class WsraDatasetAccessor:
         theta = np.deg2rad(interp_storm_direction)
         x_eye_rot, y_eye_rot = rotate_xy(x_eye, y_eye, theta)
 
-        self._obj[X_VAR_NAME + '_storm_coord'] = (('trajectory'), x_eye_rot)
-        self._obj[Y_VAR_NAME + '_storm_coord'] = (('trajectory'), y_eye_rot)
+        self._obj[X_VAR_NAME + '_storm_coord'] = ((self.trajectory_dim), x_eye_rot)
+        self._obj[Y_VAR_NAME + '_storm_coord'] = ((self.trajectory_dim), y_eye_rot)
 
         for var_name in [X_VAR_NAME, Y_VAR_NAME]:
             new_var_name = var_name + '_storm_coord'
@@ -115,11 +143,13 @@ class WsraDatasetAccessor:
     def create_trajectory_mask(
         self,
         mask_dict=None,
-        roll_limit=None,
-        altitude_limits=None,
+        roll_limit=3,
+        altitude_limits=(500, 4000),
         speed_limits=None,
+        #TODO: minimum PSV limit
     ):
         #TODO: document
+        #TODO: default values are those specified in Pincus et al. (2021)
 
         if not mask_dict:
             mask_dict = {}
@@ -139,15 +169,16 @@ class WsraDatasetAccessor:
             masks.append(create_mask(da, bounds))
 
         trajectory_mask = np.logical_and.reduce(masks)
+        mask_name = f'{self.trajectory_dim}_mask'
 
-        self._obj.coords['trajectory_mask'] = (('trajectory'), trajectory_mask)
+        self._obj.coords[mask_name] = ((self.trajectory_dim), trajectory_mask)
 
-        masked_values = np.sum(~self._obj.trajectory_mask.values)
-        self._obj['trajectory_mask'].attrs['masked_values'] = masked_values
+        num_masked_values = np.sum(~self._obj[mask_name].values)
+        self._obj[mask_name].attrs['num_masked_values'] = num_masked_values
 
         for variable, bounds in mask_dict.items():
             attr_name = variable + '_bounds'
-            self._obj['trajectory_mask'].attrs[attr_name] = bounds
+            self._obj[mask_name].attrs[attr_name] = bounds
 
     def mask(self, dim=0, **kwargs) -> xr.Dataset:
         """Filter elements from this object according to a prestablished
@@ -177,14 +208,16 @@ class WsraDatasetAccessor:
         self,
         ax=None,
         extent=None,
+        plot_best_track=True,
         **plt_kwargs
     ) -> Axes:
         if ax is None:
-            fig = plt.gcf()  # = plt.figure(figsize=(5, 5))
+            fig = plt.figure(figsize=(5, 5))  # plt.gcf()
             proj = cartopy.crs.PlateCarree()
             ax = fig.add_subplot(1, 1, 1, projection=proj)
 
         self.chart.extent = extent
+        self.chart.plot_best_track = plot_best_track
         self.chart.plot(ax, **plt_kwargs)
         return ax
 
