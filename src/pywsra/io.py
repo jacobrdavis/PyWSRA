@@ -21,7 +21,7 @@ from typing import Hashable
 import xarray as xr
 
 
-def read_wsra_file(filepath):
+def read_wsra_file(filepath: str, index_by_time: bool = True):
     """
     Read Level 4 WSRA data as an xarray Dataset.
 
@@ -32,28 +32,27 @@ def read_wsra_file(filepath):
         xr.Dataset: WSRA dataset.
     """
     wsra_ds = xr.open_dataset(filepath)
+
+    if index_by_time:
+        wsra_ds = _replace_coord_with_var(wsra_ds, 'trajectory', 'time')
+
     return wsra_ds
 
 
+#TODO: replace with xr open dir?
 def read_wsra_directory(
     directory: str,
     file_type: str = 'nc',
-    concat: bool = False,
-    concat_dim: Hashable = "trajectory",
+    index_by_time: bool = True,
     **concat_kwargs
-) -> dict[xr.Dataset]:
+) -> xr.Dataset:
     """
-    Read all Level 4 WSRA data files in a directory into a dictionary of
-    xarray Datasets or concatenated into a single Dataset.
+    Read a directory of Level 4 WSRA data files and concatenate into a Dataset.
 
     Args:
         directory (str): directory containing WSRA files
         file_type (str, optional): WSRA data file type. Defaults to '.nc'.
-        concat (bool, optional): Concatenate all WSRA Datasets into a
-            single Dataset. Defaults to False.
-        concat_dim (Hashable, optional): Name of the dimension to
-            concatenate along. See xr.concat for more information.
-            Defaults to "trajectory".
+        index_by_time
         concat_kwargs (optional): additional keyword arguments to be
             passed to the xr.concat method.
 
@@ -74,13 +73,33 @@ def read_wsra_directory(
             'Please double check the directory and file_type.')
 
     for file in wsra_files:
-        wsra_ds = read_wsra_file(file)
+        wsra_ds = read_wsra_file(file, index_by_time)
         key = file.split('/')[-1].split('.')[0]
         wsra[key] = wsra_ds
 
-    if concat:
-        wsra = xr.concat(list(wsra.values()),
-                         concat_dim,
-                         **concat_kwargs)
+    #TODO:
+    # def combine_attrs(variable_attrs, context=None):
+    #     print(variable_attrs)
+        # print(context)
 
-    return wsra
+    if index_by_time:
+        concat_dim = 'time'
+    else:
+        concat_dim = 'trajectory'
+
+    wsra_ds_concat = xr.concat(list(wsra.values()),
+                               dim=concat_dim,
+                            #    combine_attrs=combine_attrs,
+                            #    combine_attrs='no_conflicts',  #TODO: callable?
+                               **concat_kwargs)
+
+    return wsra_ds_concat
+
+
+def _replace_coord_with_var(ds, coord, var):
+    #TODO: docstr: note coord and var should have same shape
+    ds.coords[coord] = ds[var]
+    dropped = ds.drop_vars([var])
+    renamed = dropped.rename({coord: var})
+    return renamed
+
