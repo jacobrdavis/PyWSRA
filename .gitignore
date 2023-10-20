@@ -5,6 +5,9 @@ backup/
 # MacOS stuff
 .DS_store
 
+# vscode
+.vscode/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
