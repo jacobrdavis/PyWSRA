@@ -5,7 +5,7 @@ TODO:
 - consider replacing with xr.open_mfdataset
     https://docs.xarray.dev/en/stable/generated/xarray.open_mfdataset.html
 - update forward slash compatibility for windows OS
-
+- save as nc
 """
 
 __all__ = [
@@ -15,8 +15,7 @@ __all__ = [
 
 import glob
 import os
-import warnings
-from typing import Hashable, List
+from typing import List
 
 import pandas as pd
 import numpy as np
@@ -47,7 +46,6 @@ def read_wsra_file(filepath: str, index_by_time: bool = True):
     return wsra_ds
 
 
-#  TODO: replace with xr open dir?
 def read_wsra_directory(
     directory: str,
     file_type: str = 'nc',
@@ -83,7 +81,7 @@ def read_wsra_directory(
 
     for file in wsra_files:
         wsra_ds = read_wsra_file(file, index_by_time)
-        # TODO: update forward slash compatibility for windows OS
+        # TODO: update forward slash compatibility for windows OS:
         key = file.split('/')[-1].split('.')[0]
         wsra[key] = wsra_ds
 
@@ -124,7 +122,7 @@ def _replace_coord_with_var(
     return renamed
 
 
-def _combine_attrs(variable_attrs: List, context=None)-> dict:
+def _combine_attrs(variable_attrs: List, context=None) -> dict:
     """ WSRA attribute handler passed to xr.concat.
 
     If `variable_attrs` contains metadata, concatenate the attributes
@@ -138,7 +136,8 @@ def _combine_attrs(variable_attrs: List, context=None)-> dict:
     Returns:
         dict: Combined attributes.
     """
-    if 'title' in variable_attrs[0].keys():  # TODO: check if any of ATTR_KEYS in keys?
+    # TODO: check if any of ATTR_KEYS in keys?
+    if 'title' in variable_attrs[0].keys():
         attrs = _concat_attrs(variable_attrs)
     else:
         attrs = variable_attrs[0]
@@ -173,14 +172,14 @@ def _concat_attrs(variable_attrs: List):
         elif key == 'mission_id':
             attrs[key] = _aggregate_attrs(variable_attrs, key)
         elif key == 'storm_id':
-            attrs[key] = _get_unique_attrs(variable_attrs, key)
+            attrs[key] = _get_unique_attrs(variable_attrs, key)[0]
         elif key == 'date_created':
             attrs[key] = _aggregate_attrs(variable_attrs, key)
         elif key == 'time_coverage_start':
             attrs[key] = np.sort(_attrs_to_datetime(variable_attrs, key))[0]
         elif key == 'time_coverage_end':
             attrs[key] = np.sort(_attrs_to_datetime(variable_attrs, key))[-1]
-        else:  #TODO: probably don't need to raise an exception; perhaps just a warning...
+        else:  # TODO: probably don't need to raise an exception. Warning?
             raise KeyError(f'Key `{key}` not a valid attribute: {ATTR_KEYS}.')
     return attrs
 
