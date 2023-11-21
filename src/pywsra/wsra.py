@@ -143,11 +143,6 @@ class WsraDatasetAccessor:
                                            storm_direction_unwrap)
 
         # Rotate the eye distances into a storm-aligned coordinate system.
-        # theta_met = np.deg2rad(interp_storm_direction % 360)
-        # theta_trig = -(theta_met + np.pi/2) % 360
-        # theta_met = interp_storm_direction % 360
-        # theta_trig = -(theta_met - 90) % 360
-        # x_eye_rot, y_eye_rot = rotate_xy(x_eye, y_eye, np.deg2rad(theta_trig))
         theta = np.deg2rad(interp_storm_direction % 360)
         x_eye_rot, y_eye_rot = rotate_xy(x_eye, y_eye, theta)
 
