@@ -137,7 +137,7 @@ def _combine_attrs(variable_attrs: List, context=None) -> dict:
         dict: Combined attributes.
     """
     # TODO: check if any of ATTR_KEYS in keys?
-    if 'title' in variable_attrs[0].keys():
+    if 'title' in variable_attrs[0].keys():    #  all(key in variable_attrs[0].keys() for key in ATTR_KEYS)
         attrs = _concat_attrs(variable_attrs)
     else:
         attrs = variable_attrs[0]

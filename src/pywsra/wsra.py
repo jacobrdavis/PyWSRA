@@ -130,17 +130,25 @@ class WsraDatasetAccessor:
         y_eye = self._obj[Y_VAR_NAME].values
         x_eye = self._obj[X_VAR_NAME].values
 
-        # Interpolate the best track storm direction onto the WSRA times.
+        # Interpolate the best track storm direction onto the WSRA times.  To
+        # interpolate properly over angular discontinuities (360 to 0 deg),
+        # the storm direction must be unwrapped.
         storm_datetime = self.best_track.df.index
-        storm_direction = self.best_track.df['STORM_DIR']
+        storm_direction = self.best_track.df['STORM_DIR'].astype("float")
+        storm_direction_unwrap = np.unwrap(storm_direction, period=360)
         wsra_datetime = self._obj['time'].values
 
         interp_storm_direction = np.interp(wsra_datetime.astype("float"),
                                            storm_datetime.values.astype("float"),
-                                           storm_direction.astype("float"))
+                                           storm_direction_unwrap)
 
         # Rotate the eye distances into a storm-aligned coordinate system.
-        theta = np.deg2rad(interp_storm_direction)
+        # theta_met = np.deg2rad(interp_storm_direction % 360)
+        # theta_trig = -(theta_met + np.pi/2) % 360
+        # theta_met = interp_storm_direction % 360
+        # theta_trig = -(theta_met - 90) % 360
+        # x_eye_rot, y_eye_rot = rotate_xy(x_eye, y_eye, np.deg2rad(theta_trig))
+        theta = np.deg2rad(interp_storm_direction % 360)
         x_eye_rot, y_eye_rot = rotate_xy(x_eye, y_eye, theta)
 
         #TODO: east and north are innaccurate--use left and up? or y and x?
