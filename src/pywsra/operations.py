@@ -4,7 +4,7 @@ TODO:
 
 __all__ = [
     "rotate_xy",
-    "wn_spectrum_to_fq_spectrum",
+    "wn_spectrum_to_fq_dir_spectrum",
     "calculate_mean_spectral_area",
     "calculate_wn_mag_and_dir",
 ]
@@ -39,11 +39,11 @@ def rotate_xy(
     return x_rot, y_rot
 
 
-def wn_spectrum_to_fq_spectrum(  # spectrum_wavenumber_to_frequency
+def wn_spectrum_to_fq_dir_spectrum(  # spectrum_wavenumber_to_frequency
     energy: np.ndarray,
     wavenumber_east: np.ndarray,
     wavenumber_north: np.ndarray,
-    depth: float = np.inf,
+    depth: float = 1000.0,  #TODO: np.inf?
     regrid: bool = True,
     directional_resolution: float = 1,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -63,7 +63,7 @@ def wn_spectrum_to_fq_spectrum(  # spectrum_wavenumber_to_frequency
         frequency = angular_frequency / (2 * np.pi)
 
         wavenumber = waves.dispersion_solver(angular_frequency/(2*np.pi),
-                                             depth=1.0*10**3)
+                                             depth)
         wavenumber_direction_x = wavenumber * np.cos(direction)
         wavenumber_direction_y = wavenumber * np.sin(direction)
 
@@ -96,7 +96,7 @@ def wn_spectrum_to_fq_spectrum(  # spectrum_wavenumber_to_frequency
         wavenumber, direction = calculate_wn_mag_and_dir(wavenumber_east,
                                                          wavenumber_north)
         direction = waves.trig_to_met(direction)
-        angular_frequency = waves.intrinsic_dispersion(wavenumber)
+        angular_frequency = waves.intrinsic_dispersion(wavenumber, depth)
         frequency = angular_frequency / (2 * np.pi)
         energy_density_fq = waves.wn_energy_to_fq_energy(energy_density_wn,
                                                          wavenumber,

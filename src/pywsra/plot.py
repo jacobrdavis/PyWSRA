@@ -7,6 +7,8 @@ TODO:
 __all__ = [
     "WsraChart",
     "plot_wavenumber_spectrum",
+    "plot_frequency_dir_spectrum",
+    "plot_frequency_spectrum",
 ]
 
 from typing import Hashable, Tuple
@@ -20,8 +22,7 @@ import pandas as pd
 import numpy as np
 import xarray as xr
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from .operations import calculate_mean_spectral_area
-
+from .operations import calculate_mean_spectral_area, wn_spectrum_to_fq_dir_spectrum
 
 class WsraChart:
     #TODO:
@@ -53,7 +54,7 @@ class WsraChart:
         self.gridlines = None #TODO: need to improve gridliner
         self._ocean = None
 
-    @property
+    @property #TODO: really don't need to use a GeoDataFrame...
     def gdf(self):
         # if self._gdf is None:
         dim_to_drop = ["wavenumber_east", "wavenumber_north", "wavelength"]
@@ -173,12 +174,22 @@ def plot_wavenumber_spectrum(
     # depth: float = None,  #TODO:
     normalize: bool = False,
     density: bool = True,
-    # as_frequency_spectrum: bool = True,
     ax = None, #TODO:
     **pcm_kwargs,
 ):
+    if ax is None:
+        fig = plt.figure(figsize=(5, 5))  #TODO: plt.gcf()?
+        ax = fig.add_subplot(1, 1, 1)
+
+    if 'cmap' not in pcm_kwargs:
+        cmap = cmocean.cm.amp
+        cmap.set_under('white')
+        pcm_kwargs['cmap'] = cmap
+
+    if 'shading' not in pcm_kwargs:
+        pcm_kwargs['shading'] = 'gouraud'
+
     if density:
-        #TODO: replace with function
         mean_area = calculate_mean_spectral_area(wavenumber_east,
                                                  wavenumber_north)  # rad^2/m^2
         energy_plot = energy / mean_area  # m^4/rad^2
@@ -191,36 +202,7 @@ def plot_wavenumber_spectrum(
         energy_plot = energy / energy.max()
         cbar_label = 'normalized energy (-)'
 
-    # #TODO:
-    # if as_frequency_spectrum:
-    # see WSRA/backup/wsra_hurricane_ian
-
-    # energy_density_fq_noregrid, direction_noregrid, frequency_noregrid = pywsra.wn_spectrum_to_fq_spectrum(
-    # energy=np.squeeze(ian_end_slice['directional_wave_spectrum']).values,
-    # wavenumber_east=ian_end_slice['wavenumber_east'].values,
-    # wavenumber_north=ian_end_slice['wavenumber_north'].values,
-    # depth=1000,
-    # regrid=False,
-    # )
-
-    # fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
-    # cmap = cmocean.cm.amp
-    # cmap.set_under('white')
-    # pcm = ax.pcolormesh(direction_noregrid, # (-direction_noregrid + np.pi/2) % (2 * np.pi),
-    #                     frequency_noregrid/(2*np.pi),
-    #                     energy_density_fq_noregrid,
-    #                     shading='gouraud',
-    #                     # norm=mpl.colors.LogNorm(vmin=1*10**(-2), vmax=1*10**(1)))
-    #                     cmap=cmap)
-    # ax.set_theta_zero_location("N")  # theta=0 at the top  #TODO: need to reconvert convention when plotting
-    # ax.set_theta_direction(-1)  # +CW
-    # cb = fig.colorbar(pcm)
-    # cb.set_label('energy density (m$^2$/Hz)')
-
-
-    # else:
-    # #TODO:
-
+    #TODO: should not hard code
     cmap = cmocean.cm.amp
     cmap.set_under('white')
 
@@ -228,9 +210,6 @@ def plot_wavenumber_spectrum(
         wavenumber_east,
         wavenumber_north,
         energy_plot,
-        cmap=cmap,  #'magma',
-        # vmin=0.1,
-        shading='gouraud',
         **pcm_kwargs,
     )
     ax.set_aspect('equal')
@@ -263,6 +242,7 @@ def plot_wavenumber_spectrum(
     ax.set_ylabel('north wavenumber (rad/m)', ha='right', va='top', rotation=90, fontsize=9)
     ax.yaxis.set_label_coords(0.505, 1.0)
 
+    #TODO: use PatchCollection here
     circle_radians = np.deg2rad(np.linspace(0, 360, 100))
     circle_x = np.sin(circle_radians)
     circle_y = np.cos(circle_radians)
@@ -306,28 +286,84 @@ def plot_wavenumber_spectrum(
 
     return pcm #TODO: Cbar?
 
-# def plot_scalar_spectrum():
-    # fq_spectrum_var = pywsra.calculate_fq_spectrum_variance(energy_density_fq,
-    #                                                 direction[:, 0],
-    #                                                 frequency[0])
+
+def plot_frequency_dir_spectrum(
+    energy,
+    wavenumber_east,
+    wavenumber_north,
+    depth: float = 1000.0,  #TODO: np.inf?
+    normalize: bool = False,
+    ax = None, #TODO:
+    **pcm_kwargs,
+):
+    # see WSRA/backup/wsra_hurricane_ian
+    if ax is None:
+        fig = plt.figure(figsize=(5, 5))  # plt.gcf()
+        ax = fig.add_subplot(1, 1, 1, projection='polar')
+
+    # fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+
+    if 'cmap' not in pcm_kwargs:
+        cmap = cmocean.cm.amp
+        cmap.set_under('white')
+        pcm_kwargs['cmap'] = cmap
+
+    if 'shading' not in pcm_kwargs:
+        pcm_kwargs['shading'] = 'gouraud'
+
+    energy_density_fq_dir, direction, frequency = wn_spectrum_to_fq_dir_spectrum(
+        energy,
+        wavenumber_east,
+        wavenumber_north,
+        depth,
+        regrid=False,
+    )
+
+    pcm = ax.pcolormesh(direction, # (-direction_noregrid + np.pi/2) % (2 * np.pi),
+                        frequency,
+                        energy_density_fq_dir,
+                        **pcm_kwargs)
+
+    ax.set_theta_zero_location("N")  # theta=0 at the top  #TODO: need to reconvert convention when plotting
+    ax.set_theta_direction(-1)  # +CW
+    cbar = plt.gcf().colorbar(pcm, pad=0.15, shrink=0.75)
+    cbar.set_label('energy density (m^2/Hz/rad)')
+    #TODO:  use divider instead?
+    # divider = make_axes_locatable(ax)
+    # cax = divider.append_axes("left", size="5%", pad="5%", axes_class=mpl.axes.Axes)
+    # cbar = plt.colorbar(pcm, cax=cax, location="left")
+    # cbar.set_label('energy density (m^2/Hz/rad)')
+
+    return pcm
 
 
-    # scalar_energy_density = np.trapz(energy_density_fq, direction, axis=0)
-    # variance_frequency_spectrum = np.trapz(energy_density_f, angular_frequency[0])
-    # print(variance_frequency_spectrum)
 
-    # energy_density_wn = energy_wn / pywsra.calculate_mean_spectral_area(wavenumber_east, wavenumber_north)
-    # in_circle = angular_frequency_noregrid >= angular_frequency.max()  # Mask outside polar region (to account for variance)
-    # energy_density_wn[in_circle] = 0
+def plot_frequency_spectrum(
+    energy,
+    wavenumber_east,
+    wavenumber_north,
+    depth: float = 1000.0,  #TODO:
+    normalize: bool = False,  #TODO:
+    ax: mpl.axes.Axes = None,
+    **plot_kwargs,
+):
+    if ax is None:
+        fig = plt.figure(figsize=(5, 5))  #TODO: plt.gcf()?
+        ax = fig.add_subplot(1, 1, 1)
 
-    # energy_density_int_x = np.trapz(energy_density_wn, x=wavenumber_east, axis=0)
-    # variance_wavenumber_spectrum = np.trapz(energy_density_int_x, x=wavenumber_north, axis=0)
-    # print(variance_wavenumber_spectrum)
+    energy_density_fq_dir, direction, frequency = wn_spectrum_to_fq_dir_spectrum(
+        energy,
+        wavenumber_east,
+        wavenumber_north,
+        depth,
+        regrid=True,
+    )
 
-    # fig, ax = plt.subplots()
-    # ax.plot(angular_frequency[0]/(2*np.pi), energy_density_f, label='WSRA')
-    # ax.set_yscale('log')
-    # ax.set_ylabel('energy density (m^2/Hz)')
-    # ax.set_xlabel('frequency (Hz)')
+    energy_density_fq = np.trapz(energy_density_fq_dir, direction, axis=0)
 
-    # np.trapz(energy_density_fq, direction, axis=0)
+    plot = ax.plot(frequency[0], energy_density_fq, **plot_kwargs)
+    ax.set_yscale('log')
+    ax.set_ylabel('energy density (m^2/Hz)')
+    ax.set_xlabel('frequency (Hz)')
+
+    return plot

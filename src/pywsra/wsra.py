@@ -112,6 +112,7 @@ class WsraDatasetAccessor:
             wsra_ds (xr.Dataset): WSRA dataset
             storm_name (str): name of the storm/hurricane
         """
+        #TODO: east and north are innaccurate--use left and up? or y and x?
         X_VAR_NAME = 'hurricane_eye_distance_east'
         Y_VAR_NAME = 'hurricane_eye_distance_north'
         LONG_NAME_UPDATE = ', rotated into the hurricane coordinate system'

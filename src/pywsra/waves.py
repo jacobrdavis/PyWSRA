@@ -14,7 +14,7 @@ __all__ = [
     "wn_energy_to_fq_energy",
 ]
 
-from typing import Union
+from typing import Union, Tuple
 
 import numpy as np
 from scipy.optimize import newton
@@ -33,10 +33,58 @@ def phase_velocity(wavenumber, depth=np.inf):
     return intrinsic_dispersion(wavenumber, depth) / wavenumber
 
 
-def group_to_phase_ratio(wavenumber, depth=np.inf):
-    kh = wavenumber * depth
-    return 0.5 + kh / np.sinh(2 * kh)
+def group_to_phase_ratio(
+    wavenumber: np.ndarray,
+    depth: float = np.inf,
+) -> np.ndarray:
+    """ Compute the ratio of group velocity to phase velocity.
 
+    Note: to prevent overflows in `np.sinh`, the product of wavenumber and
+    depth (relative depth) are used to assign ratios at deep or shallow limits:
+
+        shallow:  Cg = 1.0 if kh < np.pi/10 (h < L/20)
+           deep:  Cg = 0.5 if kh > np.pi    (h > L/2)
+
+    Args:
+        wavenumber (np.ndarray): of shape (k,) containing wavenumbers
+        depth (float, optional): positive water depth. Defaults to np.inf.
+
+    Returns:
+        np.ndarray: of shape (k,) containing ratio at each wavenumber.
+    """
+    kh = wavenumber * depth
+    in_deep, in_shallow, in_intermd = depth_regime(kh)
+    ratio = np.empty(kh.shape)
+    ratio[in_deep] = 0.5
+    ratio[in_shallow] = 1.0
+    ratio[in_intermd] = 0.5 + kh[in_intermd] / np.sinh(2 * kh[in_intermd])
+    return ratio
+
+
+def depth_regime(kh: np.ndarray) -> Tuple:
+    """ Classify depth regime based on relative depth.
+
+    Classify depth regime based on relative depth (product of wavenumber
+    and depth) using the shallow and deep limits:
+
+        shallow:  kh < np.pi/10 (h < L/20)
+           deep:  kh > np.pi    (h > L/2)
+
+    The depth regime is classified as intermediate if not at the deep or
+    shallow limits.
+
+    Args:
+        kh (np.ndarray): relative depth of shape (k, )
+
+    Returns:
+        np.ndarray[bool]: true where kh is deep, false otherwise
+        np.ndarray[bool]: true where kh is shallow, false otherwise
+        np.ndarray[bool]: true where kh is intermediate, false otherwise
+    """
+    in_deep = kh > np.pi
+    in_shallow = kh < np.pi/10
+    in_intermd = np.logical_and(~in_deep, ~in_shallow)
+    return in_deep, in_shallow, in_intermd
 
 def intrinsic_group_velocity(wavenumber, depth=np.inf):
     ratio = group_to_phase_ratio(wavenumber, depth)
