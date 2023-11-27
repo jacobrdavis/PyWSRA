@@ -1,6 +1,5 @@
 """
-TODO:
-
+Core module for PyWSRA.  Contains xarray accessors and associated methods.
 """
 
 __all__ = [
@@ -17,6 +16,7 @@ import numpy as np
 import xarray as xr
 
 from matplotlib.axes import Axes
+from cartopy.mpl.geoaxes import GeoAxes
 from .best_track import BestTrack
 from .plot import WsraChart
 from .operations import rotate_xy, calculate_mean_spectral_area
@@ -29,14 +29,14 @@ class WsraDatasetAccessor:
     #TODO: document specific additions:
 
     """
-    def __init__(self, xarray_obj) -> xr.Dataset:
+    def __init__(self, xarray_obj):
         self._obj = xarray_obj
         self._center = None
         self._best_track = None
         self._chart = None
         self._trajectory_dim = None
         # self._mean_spectral_area = None
-        #ˇTODO: save filenames as attrs?
+        # ˇTODO: save filenames as attrs?
 
     @property
     def trajectory_dim(self):  # TODO: this will break when dims are cycled
@@ -51,7 +51,7 @@ class WsraDatasetAccessor:
 
     @property
     def center(self):
-        """Return the geographic center point of this dataset."""
+        """ Return the geographic center point of this dataset. """
         if self._center is None:
             # we can use a cache on our accessor objects, because accessors
             # themselves are cached on instances that access them.
@@ -59,11 +59,11 @@ class WsraDatasetAccessor:
             lat = self._obj.longitude
             self._center = (float(lon.mean()), float(lat.mean()))
         return self._center
-    
+
     # @property
     # def mean_spectral_area(self):
     #     """Return the mean spectral area.
-        
+
     #     Return spectral area (rad^2/m^2) as the mean area of all
     #     spectral squares formed by the wavenumber arrays.
     #     """
@@ -74,24 +74,36 @@ class WsraDatasetAccessor:
 
     #     return self._mean_spectral_area
 
-    #TODO:
+
     @property
-    def best_track(self):
-        #TODO: replace
+    def best_track(self) -> BestTrack:
+        """ Return the hurricane best track using a dataset's `storm_id`.
+
+        Returns:
+            BestTrack: Best track object.
+        """
         if self._best_track is None:
             try:
                 storm_name = self._obj.attrs['storm_id']
             except AttributeError as e:
-                #TODO: raise or try from filename?
-                print('{e}, please set the `storm_id` attr of the dataset and try again.')
+                print(f'{e}, please set the `storm_id` attr '
+                      'of the dataset and try again.')
             except URLError as e:
-                print('{e}, unable to load the best track database.')
+                print(f'{e}, unable to load the best track database.')
             self._best_track = BestTrack(storm_name)
 
         return self._best_track
 
     @property
-    def chart(self):
+    def chart(self) -> WsraChart:
+        """ Return the dataset's WsraChart object.
+
+        If a WsraChart object has not been created by the `plot()` method,
+        a default chart is initialized and returned.
+
+        Returns:
+            WsraChart: Chart object.
+        """
         if self._chart is None:
             self._chart = WsraChart(self._obj)
         return self._chart
@@ -114,52 +126,97 @@ class WsraDatasetAccessor:
         """
         X_VAR_NAME = 'hurricane_eye_distance_east'
         Y_VAR_NAME = 'hurricane_eye_distance_north'
-        LONG_NAME_UPDATE = ', rotated into the hurricane coordinate system'
+        VAR_SUFX = '_storm_coord'
+        NAME_SUFX = ', rotated into the hurricane coordinate system'
 
         y_eye = self._obj[Y_VAR_NAME].values
         x_eye = self._obj[X_VAR_NAME].values
 
-        # best_track = get_storm_track(storm_name=self._obj.attrs['storm_id'])
+        # Interpolate the best track storm direction onto the WSRA times.  To
+        # interpolate properly over angular discontinuities (360 to 0 deg),
+        # the storm direction must be unwrapped.
         storm_datetime = self.best_track.df.index
-        storm_direction = self.best_track.df['STORM_DIR']
+        storm_direction = self.best_track.df['STORM_DIR'].astype("float")
+        storm_direction_unwrap = np.unwrap(storm_direction, period=360)
         wsra_datetime = self._obj['time'].values
 
         interp_storm_direction = np.interp(wsra_datetime.astype("float"),
                                            storm_datetime.values.astype("float"),
-                                           storm_direction.astype("float"))
+                                           storm_direction_unwrap)
 
-        theta = np.deg2rad(interp_storm_direction)
+        # Rotate the eye distances into a storm-aligned coordinate system.
+        theta = np.deg2rad(interp_storm_direction % 360)
         x_eye_rot, y_eye_rot = rotate_xy(x_eye, y_eye, theta)
 
-        self._obj[X_VAR_NAME + '_storm_coord'] = ((self.trajectory_dim), x_eye_rot)
-        self._obj[Y_VAR_NAME + '_storm_coord'] = ((self.trajectory_dim), y_eye_rot)
+        #TODO: east and north are innaccurate--use left and up? or y and x?
+        self._obj[X_VAR_NAME + VAR_SUFX] = ((self.trajectory_dim), x_eye_rot)
+        self._obj[Y_VAR_NAME + VAR_SUFX] = ((self.trajectory_dim), y_eye_rot)
 
+        # Assign attributes to the new variables.
         for var_name in [X_VAR_NAME, Y_VAR_NAME]:
-            new_var_name = var_name + '_storm_coord'
-            new_long_name = self._obj[var_name].attrs['long_name'] + LONG_NAME_UPDATE
+            new_var_name = var_name + VAR_SUFX
+            new_long_name = self._obj[var_name].attrs['long_name'] + NAME_SUFX
             self._obj[new_var_name].attrs['long_name'] = new_long_name
             self._obj[new_var_name].attrs['units'] = self._obj[var_name].attrs['units']
 
     def create_trajectory_mask(
         self,
-        mask_dict=None,
-        roll_limit=3,
-        altitude_limits=(500, 4000),
-        speed_limits=None,
-        #TODO: minimum PSV limit
-    ):
-        #TODO: document
-        #TODO: default values are those specified in Pincus et al. (2021)
+        mask_dict: dict = None,
+        roll_limit: float = 3.0,
+        altitude_limits: Tuple = (500.0, 4000.0),
+        psv_limits: Tuple = None,
+        speed_limits: Tuple = None,
+    ) -> None:
+        """  Create a mask along the trajectory dimension.
 
+        Create a mask from a variable along the trajectory dimension and add it
+        to the Dataset as a coordinate.  By default, the altitude and roll
+        limits specified in Pincus et al. (2021) are used:
+
+        - `platform_radar_altitude` in [500, 4000] m
+        - abs(`wsra_computed_roll`) < 3 deg
+
+        Masks based on `wsra_computed_roll`, `'platform_radar_altitude'`,
+        `'peak_spectral_variance'`, and `'platform_speed_wrt_ground'` can be
+        specified using the keyword arguments `roll_limit`, `altitude_limits`,
+        `psv_limits` and `speed_limits`, respectively. E.g.,
+
+        >>> ds.wsra.create_trajectory_mask(roll_limit=2.5,
+                                           altitude_limits=(1000, 4000),
+                                           speed_limits=(100, 300))
+
+        Additional variables which have the `trajectory` (or `time`) dimension
+        as their only coordinate can be supplied using the `mask_dict`, e.g.,
+
+        >>> mask_dict = {'rainfall_rate_median': (0, 10)}
+
+        Note: If a mask dictionary is provided, the default roll and altitude
+        limits are not used.
+
+        Args:
+            mask_dict (dict, optional): Dictionary of variable name (str) and
+                limit (tuple) mask pairs. Defaults to None.
+            roll_limit (float, optional): Absolute limit on aircraft roll in
+                degrees. Defaults to 3.0.
+            altitude_limits (Tuple, optional): Min and max limits on aircraft
+                altitude in meters. Defaults to (500.0, 4000.0).
+            psv_limits (Tuple, optional): Min and max limits on peak spectral
+                variance. Defaults to None.
+            speed_limits (Tuple, optional): Min and max limits on aircraft
+                speed in meters per second. Defaults to None.
+        """
         if not mask_dict:
             mask_dict = {}
             if roll_limit:
                 mask_dict['wsra_computed_roll'] = (-1*roll_limit, roll_limit)
             if altitude_limits:
                 mask_dict['platform_radar_altitude'] = altitude_limits
+            if psv_limits:
+                mask_dict['peak_spectral_variance'] = psv_limits
             if speed_limits:
                 mask_dict['platform_speed_wrt_ground'] = speed_limits
 
+        # Create and store a mask for each variable and limit in `mask_dict`.
         masks = []
         for variable, bounds in mask_dict.items():
             if 'obs' in self._obj[variable].dims:
@@ -168,11 +225,13 @@ class WsraDatasetAccessor:
                 da = self._obj[variable]
             masks.append(create_mask(da, bounds))
 
+        # Take the union of all masks along the trajectory coordinate.
         trajectory_mask = np.logical_and.reduce(masks)
         mask_name = f'{self.trajectory_dim}_mask'
 
         self._obj.coords[mask_name] = ((self.trajectory_dim), trajectory_mask)
 
+        # Add the number of masked values and bounds as attributes.
         num_masked_values = np.sum(~self._obj[mask_name].values)
         self._obj[mask_name].attrs['num_masked_values'] = num_masked_values
 
@@ -181,18 +240,25 @@ class WsraDatasetAccessor:
             self._obj[mask_name].attrs[attr_name] = bounds
 
     def mask(self, dim=0, **kwargs) -> xr.Dataset:
-        """Filter elements from this object according to a prestablished
-        dimension mask.
+        """ Apply a mask to this Dataset.
 
-        See xarray.Dataset.where.
+        Screen a Dataset using a mask defined along a coordinate specified by
+        `dim`.  The mask is supplied to xarray.Dataset.where, which returns
+        a new Dataset with masked values replaced by NaNs (by default).
+
+        A mask along a dimesion must first be created using one of the
+        `wsra.create_<dim>_mask(...)` methods.  The mask is retrieved using
+        the `dim` index, which by default is the trajectory (or time) dimension
+        at the first index `dim=0` (see ds.dims).  Additional keyword arguments
+        are passed to xarray.Dataset.where (see the xarray docs).
 
         Args:
             dim (int, optional): index of `dims` along which the mask is
                 defined. Defaults to 0.
-            kwargs (optional): Additional keyword arguments for Dataset.where
+            kwargs (optional): Additional keyword arguments for Dataset.where.
 
         Returns:
-            xr.Dataset: original Dataset masked along a dimension
+            xr.Dataset: Original Dataset with the mask applied.
         """
         try:
             dim_names = list(self._obj.dims.keys())
@@ -206,11 +272,46 @@ class WsraDatasetAccessor:
 
     def plot(
         self,
-        ax=None,
-        extent=None,
-        plot_best_track=True,
+        ax: GeoAxes = None,
+        extent: Tuple = None,
+        plot_best_track: bool = True,
         **plt_kwargs
-    ) -> Axes:
+    ) -> GeoAxes:
+        """ Plot the WSRA flight track.
+
+        Plot the WSRA flight track on a WsraChart.  If a chart does not
+        exist, a new chart is created and added to the Cartopy GeoAxes
+        specified by `ax`.  The default chart extent covers the entire track,
+        however a custom extend can be specified using the `extent` keyword
+        which should be a four-element Tuple containing:
+
+        (<min longitude>, <max longitude>, <min latitude>, <max latitude>)
+
+        For example, to plot the rectangular domain from 60W to 49W
+        and 10N to 17N:
+
+        >>> ds.wsra.plot(extent=(-60, -49, 10, 17))
+
+        For context, the chart includes the land features and hurricane best
+        track by default.  To exclude the best track (e.g., for non-hurricane
+        datasets or offline workflows), set `plot_best_track=False`.  Note: the
+        `storm_id` attribute must be set to use this feature.
+
+        See pywsra.WsraChart for additional properties.
+
+        Args:
+            ax (GeoAxes, optional): Cartopy axes to plot on. If None, GeoAxes
+                are created.
+            extent (Tuple, optional): Geographic extent. Defaults to None,
+                which will use default extents determined by Cartopy.
+            plot_best_track (bool, optional): Add the hurricane best track to
+                plot. Defaults to True.
+            plt_kwargs (optional): Additional keyword arguments passed to
+                GeoAxes.plot().
+
+        Returns:
+            GeoAxes: Axes containing the flight track plot.
+        """
         if ax is None:
             fig = plt.figure(figsize=(5, 5))  # plt.gcf()
             proj = cartopy.crs.PlateCarree()
@@ -220,7 +321,6 @@ class WsraDatasetAccessor:
         self.chart.plot_best_track = plot_best_track
         self.chart.plot(ax, **plt_kwargs)
         return ax
-
 
 
 @xr.register_dataarray_accessor("wsra")
@@ -236,18 +336,26 @@ class WsraDataArrayAccessor:
         self._center = None
 
     def mask(self, dim=0, **kwargs) -> xr.DataArray:
-        """Filter elements from this object according to a prestablished
-        dimension mask.
+        """ Apply a mask to this DataArray.
 
-        See xarray.DataArray.where.
+        Screen a DataArray using a mask defined along a coordinate specified by
+        `dim`.  The mask is supplied to xarray.DataArray.where, which returns
+        a new DataArray with masked values replaced by NaNs (by default).
+
+        A mask along a dimesion must first be created using one of the
+        `wsra.create_<dim>_mask(...)` methods.  The mask is retrieved using
+        the `dim` index, which by default is the trajectory (or time) dimension
+        at the first index `dim=0` (see ds.dims).  Additional keyword arguments
+        are passed to xarray.DataArray.where (see the xarray docs).
 
         Args:
             dim (int, optional): index of `dims` along which the mask is
                 defined. Defaults to 0.
-            kwargs (optional): Additional keyword arguments for DataArray.where
+            kwargs (optional): Additional keyword arguments for
+                DataArray.where.
 
         Returns:
-            xr.DataArray: original DataArray masked along a dimension
+            xr.DataArray: Original DataArray with the mask applied.
         """
         try:
             mask = self._obj.dims[dim] + '_mask'
@@ -255,10 +363,21 @@ class WsraDataArrayAccessor:
         except KeyError as error:
             print(f"Mask {error} does not exist in coordinates.\n"
                   f"To create a mask, use the: "
-                  f"`<Dataset>.wsra.create_<dim>_mask(...)`method.")
+                  f"`<DataArray>.wsra.create_<dim>_mask(...)`method.")
             return self._obj
 
 
-def create_mask(da, bounds):
+def create_mask(da: xr.DataArray, bounds: Tuple) -> np.ndarray:
+    """ Return a boolean array which is 1 where unmasked and 0 where masked.
+
+    Note: the bounds are inclusive.
+
+    Args:
+        da (DataArray): Array used to create the mask.
+        bounds (Tuple): Min and max limits on `da`.
+
+    Returns:
+        ndarray: Mask as a boolean array.
+    """
     return np.logical_and(da >= bounds[0],
                           da <= bounds[-1])
