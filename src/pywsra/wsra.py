@@ -159,6 +159,8 @@ class WsraDatasetAccessor:
             self._obj[new_var_name].attrs['long_name'] = new_long_name
             self._obj[new_var_name].attrs['units'] = self._obj[var_name].attrs['units']
 
+        
+
     #TODO: Quality control using PSV limits, mss lag value std, and mss median value
     def create_trajectory_mask(
         self,
@@ -167,7 +169,7 @@ class WsraDatasetAccessor:
         altitude_limits: Tuple = (500.0, 4000.0),
         psv_limits: Optional[Tuple] = None,
         speed_limits: Optional[Tuple] = None,
-    ) -> None:
+    ) -> xr.Dataset:
         """  Create a mask along the trajectory dimension.
 
         Create a mask from a variable along the trajectory dimension and add it
@@ -239,6 +241,8 @@ class WsraDatasetAccessor:
         for variable, bounds in mask_dict.items():
             attr_name = variable + '_bounds'
             self._obj[mask_name].attrs[attr_name] = bounds
+
+        return self._obj
 
     def mask(self, dim=0, **kwargs) -> xr.Dataset:
         """ Apply a mask to this Dataset.
