@@ -187,8 +187,15 @@ def _met_time_to_datetime(met_ds: xr.Dataset) -> xr.Dataset:
     Returns:
         xr.Dataset: P-3 met dataset with datetime coordinate.
     """
+    # Drop NaNs and sort the Dataset by time (seconds from start of flight).
+    met_ds = (met_ds
+              .dropna(dim='Time', how='all', subset=['Time'])
+              .sortby('Time'))
+
+    # Convert seconds from start of flight to datetimes using the POSIX
+    # timestamp stored in attributes.  Assign it as the new coordinate.
     start_datetime_posix = met_ds.attrs['StartTime']
     datetime_posix = start_datetime_posix + met_ds['Time']
     datetime = pd.to_datetime(datetime_posix, unit='s', origin='unix')
     met_ds['Time'] = datetime
-    return met_ds.dropna(dim='Time', how='all', subset=['Time'])
+    return met_ds

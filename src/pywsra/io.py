@@ -42,6 +42,7 @@ def read_wsra_file(filepath: str, index_by_time: bool = True):
 
     if index_by_time:
         wsra_ds = _replace_coord_with_var(wsra_ds, 'trajectory', 'time')
+        wsra_ds = wsra_ds.sortby('time')
 
     return wsra_ds
 
