@@ -7,7 +7,7 @@ __all__ = [
     "WsraDataArrayAccessor",
 ]
 
-from typing import Hashable, Tuple
+from typing import Hashable, Tuple, Optional
 from urllib.error import URLError
 
 import cartopy
@@ -159,13 +159,14 @@ class WsraDatasetAccessor:
             self._obj[new_var_name].attrs['long_name'] = new_long_name
             self._obj[new_var_name].attrs['units'] = self._obj[var_name].attrs['units']
 
+    #TODO: Quality control using PSV limits, mss lag value std, and mss median value
     def create_trajectory_mask(
         self,
-        mask_dict: dict = None,
+        mask_dict: Optional[dict] = None,
         roll_limit: float = 3.0,
         altitude_limits: Tuple = (500.0, 4000.0),
-        psv_limits: Tuple = None,
-        speed_limits: Tuple = None,
+        psv_limits: Optional[Tuple] = None,
+        speed_limits: Optional[Tuple] = None,
     ) -> None:
         """  Create a mask along the trajectory dimension.
 
@@ -272,9 +273,9 @@ class WsraDatasetAccessor:
 
     def plot(
         self,
-        ax: GeoAxes = None,
-        extent: Tuple = None,
-        plot_best_track: bool = True,
+        ax: Optional[GeoAxes] = None,
+        extent: Optional[Tuple] = None,
+        plot_best_track: Optional[bool] = True,
         **plt_kwargs
     ) -> GeoAxes:
         """ Plot the WSRA flight track.

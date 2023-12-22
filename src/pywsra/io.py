@@ -45,7 +45,7 @@ def read_wsra_file(filepath: str, index_by_time: bool = True):
 
     return wsra_ds
 
-
+#TODO: use xr.open_mfdataset() instead with concat kw arguments
 def read_wsra_directory(
     directory: str,
     file_type: str = 'nc',
