@@ -44,8 +44,8 @@ def read_met_directory(
         file_type (str, optional): Met data file type. Defaults to '.nc'.
         data_vars (str or List): Variables to load into memory. Acceptable
             values include a list of variables or 'all'.  Defaults to 'all'.
-        concat_kwargs (optional): Additional keyword arguments to be
-            passed to the xr.concat method.
+        concat_kwargs (optional): Additional keyword arguments are passed to
+            the xarray.concat.
 
     Raises:
         FileNotFoundError: If no files of type `file_type` are found
@@ -132,6 +132,8 @@ def merge_met_vars(
             `data_vars` every 50 s. Defaults to np.nanmean.
         rename_dict (dict, optional): Dictionary of current met variable names
             as keys with desired names as values. Passed to Dataset.rename().
+        merge_kwargs (optional): additional keyword arguments are passed
+            to the xarray.Dataset.merge method.
 
     Returns:
         xr.Dataset: Original WSRA dataset with met variables merged in.
