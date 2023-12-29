@@ -122,9 +122,9 @@ def _replace_coord_with_var(
 def _combine_attrs(variable_attrs: List, context=None) -> dict:
     """ WSRA attribute handler passed to xr.concat.
 
-    If `variable_attrs` contains metadata, concatenate the attributes
-    accordingly.  Otherwise, if `variable_attrs` contains variable
-    descriptions, pass back the first set of attributes.
+    If `variable_attrs` contains metadata at the Dataset level, concatenate the
+    attributes accordingly.  Otherwise, if `variable_attrs` contains variable
+    descriptions at the DataArray level, pass back the first set of attributes.
 
     Args:
         variable_attrs (List): Attribute dictionaries to combine.
@@ -133,9 +133,10 @@ def _combine_attrs(variable_attrs: List, context=None) -> dict:
     Returns:
         dict: Combined attributes.
     """
-    # TODO: check if any of ATTR_KEYS in keys?
-    # Check if the keys are at the Dataset level.
-    if 'title' in variable_attrs[0].keys():    #  all(key in variable_attrs[0].keys() for key in ATTR_KEYS)
+    # Check if the keys are at the Dataset level. If so, concatenate them.
+    # Otherwise, they are DataArray attributes and only the first is taken.
+    if 'title' in variable_attrs[0].keys():  #  all(key in variable_attrs[0].keys() for key in ATTR_KEYS)
+        # TODO: check if any of ATTR_KEYS in keys?
         attrs = _concat_attrs(variable_attrs)
     else:
         attrs = variable_attrs[0]
@@ -172,7 +173,7 @@ def _concat_attrs(variable_attrs: List):
         elif key == 'mission_id':
             attrs[key] = _aggregate_attrs(variable_attrs, key)
         elif key == 'storm_id':
-            attrs[key] = _get_unique_attrs(variable_attrs, key)[0]
+            attrs[key] = _get_unique_attrs(variable_attrs, key)[0]  # TODO: should remove this
         elif key == 'date_created':
             attrs[key] = _aggregate_attrs(variable_attrs, key)
         elif key == 'time_coverage_start':
@@ -205,6 +206,3 @@ def _attrs_to_datetime(variable_attrs, key) -> List:
     """ Convert date-like attributes to datetimes """
     all_attrs = _aggregate_attrs(variable_attrs, key)
     return list(pd.to_datetime(all_attrs))
-
-
-
