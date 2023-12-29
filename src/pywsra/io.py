@@ -4,7 +4,6 @@ Input/output methods.
 TODO:
 - consider replacing with xr.open_mfdataset
     https://docs.xarray.dev/en/stable/generated/xarray.open_mfdataset.html
-- update forward slash compatibility for windows OS
 - save as nc
 """
 
@@ -22,10 +21,6 @@ import numpy as np
 import xarray as xr
 
 
-ATTR_KEYS = ['title', 'history', 'flight_id', 'mission_id', 'storm_id',
-             'date_created', 'time_coverage_start', 'time_coverage_end']
-
-
 def read_wsra_file(filepath: str, index_by_time: bool = True):
     """
     Read Level 4 WSRA data as an xarray Dataset.
@@ -39,6 +34,8 @@ def read_wsra_file(filepath: str, index_by_time: bool = True):
         xr.Dataset: WSRA dataset.
     """
     wsra_ds = xr.open_dataset(filepath)
+
+    wsra_ds.attrs['pywsra_file'] = os.path.basename(filepath)
 
     if index_by_time:
         wsra_ds = _replace_coord_with_var(wsra_ds, 'trajectory', 'time')
@@ -82,8 +79,7 @@ def read_wsra_directory(
 
     for file in wsra_files:
         wsra_ds = read_wsra_file(file, index_by_time)
-        # TODO: update forward slash compatibility for windows OS:
-        key = file.split('/')[-1].split('.')[0]
+        key = os.path.basename(file).rsplit('.')[0]
         wsra[key] = wsra_ds
 
     if index_by_time:
@@ -138,6 +134,7 @@ def _combine_attrs(variable_attrs: List, context=None) -> dict:
         dict: Combined attributes.
     """
     # TODO: check if any of ATTR_KEYS in keys?
+    # Check if the keys are at the Dataset level.
     if 'title' in variable_attrs[0].keys():    #  all(key in variable_attrs[0].keys() for key in ATTR_KEYS)
         attrs = _concat_attrs(variable_attrs)
     else:
@@ -148,10 +145,11 @@ def _combine_attrs(variable_attrs: List, context=None) -> dict:
 def _concat_attrs(variable_attrs: List):
     """Concatenate WSFA metadata attributes.
 
-    Handle attributes during concatenation of WSRA Datasets.  Assumes all
-    attribute dictionaries in `variable_attrs` contain the same keys but with
-    possibly different values.  Where possible, unique values are taken.
-    Otherwise, values are aggregated into a list.
+    Handle attributes during concatenation of WSRA Datasets.  Explicit
+    handling is defined for standard WSRA attributes.  Where possible, unique
+    values are taken. Otherwise, values are aggregated into a list.
+
+    For all non-standard WSRA attributes, only unique values are taken.
 
     Args:
         variable_attrs (List): Attribute dictionaries to combine.
@@ -162,8 +160,9 @@ def _concat_attrs(variable_attrs: List):
     Returns:
         dict: Combined attributes.
     """
-    attrs = {k: [] for k in ATTR_KEYS}
-    for key in ATTR_KEYS:
+    attr_keys = _get_unique_keys(variable_attrs)
+    attrs = {k: [] for k in attr_keys}
+    for key in attr_keys:
         if key == 'title':
             attrs[key] = _get_unique_attrs(variable_attrs, key)
         elif key == 'history':
@@ -180,24 +179,32 @@ def _concat_attrs(variable_attrs: List):
             attrs[key] = np.sort(_attrs_to_datetime(variable_attrs, key))[0]
         elif key == 'time_coverage_end':
             attrs[key] = np.sort(_attrs_to_datetime(variable_attrs, key))[-1]
-        else:  # TODO: probably don't need to raise an exception. Warning?
-            raise KeyError(f'Key `{key}` not a valid attribute: {ATTR_KEYS}.')
+        else:
+            attrs[key] = _get_unique_attrs(variable_attrs, key)
     return attrs
+
+
+def _get_unique_keys(variable_attrs):
+    """ Return unique keys from a set of attributes """
+    # return [key for key in {key:None for attrs in variable_attrs for key in attrs}]
+    return list({key: None for attrs in variable_attrs for key in attrs})
 
 
 def _get_unique_attrs(variable_attrs, key) -> List:
     """ Return unique values from a set of attributes """
     all_attrs = _aggregate_attrs(variable_attrs, key)
-    return list(np.unique(all_attrs))  # TODO: try replacing with built-in
+    return list(np.unique(all_attrs))  # TODO: try replacing with built-in set
 
 
 def _aggregate_attrs(variable_attrs, key) -> List:
     """ Aggregate all attributes into a list """
-    return [attrs[key] for attrs in variable_attrs]
+    return [attrs[key] for attrs in variable_attrs if key in attrs.keys()]
 
 
 def _attrs_to_datetime(variable_attrs, key) -> List:
     """ Convert date-like attributes to datetimes """
     all_attrs = _aggregate_attrs(variable_attrs, key)
     return list(pd.to_datetime(all_attrs))
+
+
 

@@ -16,8 +16,6 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-#TODO: read_met_directory() should receive an optional set of variables to
-# query before the dataset is loaded (speeds up interpolation and merging).
 #TODO: could automate reading of met data using WSRA filename (or date) which
 # has the airplane identifier on it.
 def read_met_directory(
@@ -157,8 +155,9 @@ def _resample_met_vars(
     resample_method: Callable
 ) -> xr.Dataset:
 
+    # Resample each variable onto `resample_times`.  Aggregate observations
+    # in a 50 s window centered on each time using `resample_method`.
     var_dict = {var: [] for var in data_vars}
-
     for t in resample_times:
         t_start = t - pd.Timedelta(25, 'S')
         t_end = t + pd.Timedelta(25, 'S')
@@ -166,6 +165,7 @@ def _resample_met_vars(
         for var, values in var_dict.items():
             values.append(resample_method(met_in_window[var].values))
 
+    # Construct a new Dataset using the resampled variables and new times
     met_resampled_ds = xr.Dataset(
         data_vars={
             var: (['time'], values) for var, values in var_dict.items()
@@ -174,6 +174,11 @@ def _resample_met_vars(
             time=resample_times,
         ),
     )
+
+    # Copy attributes from the original DataArray(s)
+    for var in var_dict.keys():
+        met_resampled_ds[var].attrs = met_ds[var].attrs
+
     return met_resampled_ds
 
 
