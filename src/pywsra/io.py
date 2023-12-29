@@ -173,7 +173,9 @@ def _concat_attrs(variable_attrs: List):
         elif key == 'mission_id':
             attrs[key] = _aggregate_attrs(variable_attrs, key)
         elif key == 'storm_id':
-            attrs[key] = _get_unique_attrs(variable_attrs, key)[0]  # TODO: should remove this
+            # TODO: this can be misleading and should be fixed to return a
+            # single value if len=1 and a list otherwise.
+            attrs[key] = _get_unique_attrs(variable_attrs, key)[0]  
         elif key == 'date_created':
             attrs[key] = _aggregate_attrs(variable_attrs, key)
         elif key == 'time_coverage_start':
