@@ -67,6 +67,7 @@ VERSION = __version__
 PACKAGE_DATA = {'pywsra': [pjoin('data', '*')]}  # or {'': ['data/x', 'data/x']}
 REQUIRES = [
     "cartopy",
+    "cmocean",
     "geopandas",
     "matplotlib",
     "numpy",

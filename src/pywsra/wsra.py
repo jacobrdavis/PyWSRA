@@ -7,7 +7,7 @@ __all__ = [
     "WsraDataArrayAccessor",
 ]
 
-from typing import Hashable, Tuple
+from typing import Hashable, Tuple, Optional
 from urllib.error import URLError
 
 import cartopy
@@ -39,10 +39,15 @@ class WsraDatasetAccessor:
         # ˇTODO: save filenames as attrs?
 
     @property
-    def trajectory_dim(self):  # TODO: this will break when dims are cycled
+    def trajectory_dim(self):
         if self._trajectory_dim is None:
             dim_names = list(self._obj.dims.keys())
-            self._trajectory_dim = dim_names[0]
+            if 'time' in dim_names:
+                trajectory_dim_index = dim_names.index('time')
+            else:
+                trajectory_dim_index = dim_names.index('trajectory')
+
+            self._trajectory_dim = dim_names[trajectory_dim_index]
         return self._trajectory_dim
 
     @trajectory_dim.setter
@@ -108,6 +113,7 @@ class WsraDatasetAccessor:
             self._chart = WsraChart(self._obj)
         return self._chart
 
+    #TODO: this method should return a new dataset
     def to_storm_coord(self) -> None:
         """
         Rotate x and y coordinates into the hurricane reference frame.
@@ -159,14 +165,16 @@ class WsraDatasetAccessor:
             self._obj[new_var_name].attrs['long_name'] = new_long_name
             self._obj[new_var_name].attrs['units'] = self._obj[var_name].attrs['units']
 
+
+    #TODO: Quality control using PSV limits, mss lag value std, and mss median value
     def create_trajectory_mask(
         self,
-        mask_dict: dict = None,
+        mask_dict: Optional[dict] = None,
         roll_limit: float = 3.0,
         altitude_limits: Tuple = (500.0, 4000.0),
-        psv_limits: Tuple = None,
-        speed_limits: Tuple = None,
-    ) -> None:
+        psv_limits: Optional[Tuple] = None,
+        speed_limits: Optional[Tuple] = None,
+    ) -> xr.Dataset:
         """  Create a mask along the trajectory dimension.
 
         Create a mask from a variable along the trajectory dimension and add it
@@ -220,7 +228,7 @@ class WsraDatasetAccessor:
         masks = []
         for variable, bounds in mask_dict.items():
             if 'obs' in self._obj[variable].dims:
-                da = np.median(self._obj[variable], axis=1)
+                da = self._obj[variable].median(axis=1)
             else:
                 da = self._obj[variable]
             masks.append(create_mask(da, bounds))
@@ -239,7 +247,9 @@ class WsraDatasetAccessor:
             attr_name = variable + '_bounds'
             self._obj[mask_name].attrs[attr_name] = bounds
 
-    def mask(self, dim=0, **kwargs) -> xr.Dataset:
+        return self._obj
+
+    def mask(self, dim: str = 'trajectory', **kwargs) -> xr.Dataset:
         """ Apply a mask to this Dataset.
 
         Screen a Dataset using a mask defined along a coordinate specified by
@@ -248,32 +258,34 @@ class WsraDatasetAccessor:
 
         A mask along a dimesion must first be created using one of the
         `wsra.create_<dim>_mask(...)` methods.  The mask is retrieved using
-        the `dim` index, which by default is the trajectory (or time) dimension
-        at the first index `dim=0` (see ds.dims).  Additional keyword arguments
-        are passed to xarray.Dataset.where (see the xarray docs).
+        `dim`, which by default is the trajectory (or time) dimension.
+        Additional keyword arguments are passed to xarray.Dataset.where.
 
         Args:
-            dim (int, optional): index of `dims` along which the mask is
-                defined. Defaults to 0.
+            dim (str, optional): Dataset dimension along which the mask is
+                defined. Defaults to 'trajectory'.
             kwargs (optional): Additional keyword arguments for Dataset.where.
 
         Returns:
             xr.Dataset: Original Dataset with the mask applied.
         """
         try:
-            dim_names = list(self._obj.dims.keys())
-            mask = dim_names[dim] + '_mask'
+            if dim == 'trajectory':
+                mask = self.trajectory_dim + '_mask'
+            else:
+                mask = dim + '_mask'
             return self._obj.where(self._obj.coords[mask], **kwargs)
+
         except KeyError as error:
-            print(f"Mask {error} does not exist in coordinates.\n"
+            print(f"{error}\n Mask does not exist in coordinates. "
                   f"To create a mask, use the: "
                   f"`<Dataset>.wsra.create_<dim>_mask(...)`method.")
             return self._obj
 
     def plot(
         self,
-        ax: GeoAxes = None,
-        extent: Tuple = None,
+        ax: Optional[GeoAxes] = None,
+        extent: Optional[Tuple] = None,
         plot_best_track: bool = True,
         **plt_kwargs
     ) -> GeoAxes:
@@ -322,6 +334,7 @@ class WsraDatasetAccessor:
         self.chart.plot(ax, **plt_kwargs)
         return ax
 
+    #TODO: colocate methods?
 
 @xr.register_dataarray_accessor("wsra")
 class WsraDataArrayAccessor:
@@ -335,7 +348,7 @@ class WsraDataArrayAccessor:
         self._obj = xarray_obj
         self._center = None
 
-    def mask(self, dim=0, **kwargs) -> xr.DataArray:
+    def mask(self, dim: str = 'trajectory', **kwargs) -> xr.DataArray:
         """ Apply a mask to this DataArray.
 
         Screen a DataArray using a mask defined along a coordinate specified by
@@ -344,13 +357,12 @@ class WsraDataArrayAccessor:
 
         A mask along a dimesion must first be created using one of the
         `wsra.create_<dim>_mask(...)` methods.  The mask is retrieved using
-        the `dim` index, which by default is the trajectory (or time) dimension
-        at the first index `dim=0` (see ds.dims).  Additional keyword arguments
-        are passed to xarray.DataArray.where (see the xarray docs).
+        `dim`, which by default is the trajectory (or time) dimension.
+        Additional keyword arguments are passed to xarray.DataArray.where.
 
         Args:
-            dim (int, optional): index of `dims` along which the mask is
-                defined. Defaults to 0.
+            dim (str, optional): DataArray dimension along which the mask is
+                defined. Defaults to 'trajectory'.
             kwargs (optional): Additional keyword arguments for
                 DataArray.where.
 
@@ -358,7 +370,10 @@ class WsraDataArrayAccessor:
             xr.DataArray: Original DataArray with the mask applied.
         """
         try:
-            mask = self._obj.dims[dim] + '_mask'
+            if dim == 'trajectory':
+                mask = self.trajectory_dim + '_mask'
+            else:
+                mask = dim + '_mask'
             return self._obj.where(self._obj.coords[mask], **kwargs)
         except KeyError as error:
             print(f"Mask {error} does not exist in coordinates.\n"

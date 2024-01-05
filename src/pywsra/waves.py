@@ -200,8 +200,8 @@ def wn_energy_to_fq_energy(
     """ Transform energy density from wavenumber space to frequency space.
 
     Transform energy density, defined on a 2-D wavenumber grid, to energy
-    density on a frequency-direction grid using the appropriate Jacobian
-    function. The calculation follows that of the WaMoS II processing in [1]:
+    density on a frequency-direction grid using the appropriate Jacobian.
+    The calculation follows that of the WaMoS II processing in [1]:
 
     E(w, theta) = E(kx, ky) k dk/dw
 
@@ -213,7 +213,7 @@ def wn_energy_to_fq_energy(
     (w) and direction (theta), E(kx, ky) is the energy density as a function of
     the east wavenumber (kx) and north wavenumber (kx), k is the
     scalar wavenumber computed as magnitude{kx, ky}, and k dk/dw comprise the
-    Jacobian function with dk/dw equal to the inverse of the group velocity
+    Jacobian with dk/dw equal to the inverse of the group velocity
     (i.e., 1/Cg). The final result is converted from angular frequency to
     frequency (f) such that E(f, theta) is returned. This transformation
     assumes linear wave dispersion.
