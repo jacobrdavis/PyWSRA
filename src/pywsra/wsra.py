@@ -334,6 +334,7 @@ class WsraDatasetAccessor:
         self.chart.plot(ax, **plt_kwargs)
         return ax
 
+    #TODO: colocate methods?
 
 @xr.register_dataarray_accessor("wsra")
 class WsraDataArrayAccessor:

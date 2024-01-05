@@ -115,6 +115,9 @@ def _replace_coord_with_var(
     """
     ds.coords[coord] = ds[var]
     dropped = ds.drop_vars([var])
+    #TODO:  UserWarning: rename 'trajectory' to 'time' does not create an
+    # index anymore. Try using swap_dims instead or use set_index after rename
+    # to create an indexed coordinate.
     renamed = dropped.rename({coord: var})
     return renamed
 
@@ -175,13 +178,13 @@ def _concat_attrs(variable_attrs: List):
         elif key == 'storm_id':
             # TODO: this can be misleading and should be fixed to return a
             # single value if len=1 and a list otherwise.
-            attrs[key] = _get_unique_attrs(variable_attrs, key)[0]  
+            attrs[key] = _get_unique_attrs(variable_attrs, key)[0]
         elif key == 'date_created':
             attrs[key] = _aggregate_attrs(variable_attrs, key)
         elif key == 'time_coverage_start':
-            attrs[key] = np.sort(_attrs_to_datetime(variable_attrs, key))[0]
+            attrs[key] = _attrs_to_datetime(variable_attrs, key)[0].isoformat()
         elif key == 'time_coverage_end':
-            attrs[key] = np.sort(_attrs_to_datetime(variable_attrs, key))[-1]
+            attrs[key] = _attrs_to_datetime(variable_attrs, key)[-1].isoformat()
         else:
             attrs[key] = _get_unique_attrs(variable_attrs, key)
     return attrs
@@ -207,4 +210,5 @@ def _aggregate_attrs(variable_attrs, key) -> List:
 def _attrs_to_datetime(variable_attrs, key) -> List:
     """ Convert date-like attributes to datetimes """
     all_attrs = _aggregate_attrs(variable_attrs, key)
-    return list(pd.to_datetime(all_attrs))
+    attrs_as_datetimes = np.sort(pd.to_datetime(all_attrs))
+    return list(attrs_as_datetimes)
