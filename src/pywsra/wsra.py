@@ -15,11 +15,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
+from . import operations
 from matplotlib.axes import Axes
 from cartopy.mpl.geoaxes import GeoAxes
 from .best_track import BestTrack
 from .plot import WsraChart
-from .operations import rotate_xy, calculate_mean_spectral_area
+# from .operations import rotate_xy, calculate_mean_spectral_area
 
 
 @xr.register_dataset_accessor("wsra")
@@ -152,7 +153,7 @@ class WsraDatasetAccessor:
 
         # Rotate the eye distances into a storm-aligned coordinate system.
         theta = np.deg2rad(interp_storm_direction % 360)
-        x_eye_rot, y_eye_rot = rotate_xy(x_eye, y_eye, theta)
+        x_eye_rot, y_eye_rot = operations.rotate_xy(x_eye, y_eye, theta)
 
         #TODO: east and north are innaccurate--use left and up? or y and x?
         self._obj[X_VAR_NAME + VAR_SUFX] = ((self.trajectory_dim), x_eye_rot)
@@ -334,7 +335,20 @@ class WsraDatasetAccessor:
         self.chart.plot(ax, **plt_kwargs)
         return ax
 
-    #TODO: colocate methods?
+
+    def correct_mss_for_rain(self):
+        #TODO: repeat for all mss obs (not just median)
+        mss_corrected = operations.correct_mss_for_rain(
+            mss_0=self._obj['sea_surface_mean_square_slope_median'],
+            rain_rate=self._obj['rainfall_rate_median'],
+            altitude=self._obj['platform_radar_altitude'],
+        )
+
+    self._obj['sea_surface_mean_square_slope_median'] = ((self.trajectory_dim), x_eye_rot)
+    #TODO: return a new copy of the dataset
+
+
+    #TODO: colocatation methods?
 
 @xr.register_dataarray_accessor("wsra")
 class WsraDataArrayAccessor:
