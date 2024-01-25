@@ -165,3 +165,59 @@ def calculate_wn_mag_and_dir(
     magnitude = np.sqrt(wavenumber_east_grid**2 + wavenumber_north_grid**2)
     direction = np.arctan2(wavenumber_north_grid, wavenumber_east_grid)  # TODO: swap for met conv?
     return magnitude, direction
+
+
+#TODO: use Chris table as test
+def correct_mss_for_rain(mss_0, rain_rate, altitude):
+    """Correct WSRA mean square slopes for rain attenuation.
+
+    WSRA mean square slope is calculated from the slope of the backscattered
+    power versus the tangent squared of the off-nadir angle.  Since scans
+    further from nadir have a slightly longer path length, they experience more
+    rain attenuation.  This function accounts for this effect by adjusting the
+    original mean square slope, `mss_0`, by an attenuation factor, DN:
+
+    mss = (1/mss_0 - DN/const)^(-1)
+
+    where const = 20log10(e).  The attenuation DN is a function of rainfall
+    rate and radar altitude.
+
+    Args:
+        mss_0 (np.ndarray): original WSRA mean square slope with shape (n,)
+        rain_rate (np.ndarray): rainfall rate in mm/hr with shape (n,)
+        altitude (np.ndarray): radar altitude in m with shape (n,)
+
+    Returns:
+        np.ndarray: mean square slope corrected for rain attenuation with
+            shape (n,).
+    """
+    altitude_km = altitude * 10**(-3)
+    atten = calculate_rain_attenuation(rain_rate, altitude_km)
+    const = 20 * np.log10(np.e)
+    return (1/mss_0 - atten/const)**(-1)
+
+
+def calculate_rain_attenuation(
+    rain_rate: np.ndarray,
+    altitude_km: np.ndarray,
+) -> np.ndarray:
+    """Calculate rain attenuation based on rainfall rate and radar altitude.
+
+    The attenuation DN, expressed in dB, is:
+
+    DN = alpha * rain_rate * altitude_km
+
+    where `alpha` = 0.16 dBZ/km/(mm/hr) is a 2-way attenuation coefficient,
+    `rain_rate` is the rainfall rate in mm/hr, and `altitude_km` is the radar
+    altitude in km.
+
+    Args:
+        rain_rate (np.ndarray): rainfall rate in mm/hr with shape (n,)
+        altitude_km (np.ndarray): radar altitude in km with shape (n,)
+
+    Returns:
+        np.ndarray: attenuation, in dB, at each rain rate and altitude with
+            shape (n,).
+    """
+    alpha = 0.16  # 2-way attenuation coeff in dBZ/km/(mm/hr)
+    return alpha * rain_rate * altitude_km

@@ -2,6 +2,7 @@
 Input/output methods.
 
 TODO:
+- rename to prevent overlap with built-in io module...
 - consider replacing with xr.open_mfdataset
     https://docs.xarray.dev/en/stable/generated/xarray.open_mfdataset.html
 - save as nc
@@ -37,7 +38,7 @@ def read_wsra_file(filepath: str, index_by_time: bool = True):
 
     wsra_ds.attrs['pywsra_file'] = os.path.basename(filepath)
 
-    if index_by_time:
+    if index_by_time:  #TODO: make wsra ds .wsra method
         wsra_ds = _replace_coord_with_var(wsra_ds, 'trajectory', 'time')
         wsra_ds = wsra_ds.sortby('time')
 
