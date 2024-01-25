@@ -7,7 +7,7 @@ __all__ = [
     "WsraDataArrayAccessor",
 ]
 
-from typing import Hashable, Tuple, Optional
+from typing import Hashable, List, Tuple, Optional
 from urllib.error import URLError
 
 import cartopy
@@ -20,6 +20,7 @@ from matplotlib.axes import Axes
 from cartopy.mpl.geoaxes import GeoAxes
 from .best_track import BestTrack
 from .plot import WsraChart
+from .colocate import colocate_with_path
 # from .operations import rotate_xy, calculate_mean_spectral_area
 
 
@@ -336,19 +337,104 @@ class WsraDatasetAccessor:
         return ax
 
 
-    def correct_mss_for_rain(self):
-        #TODO: repeat for all mss obs (not just median)
-        mss_corrected = operations.correct_mss_for_rain(
-            mss_0=self._obj['sea_surface_mean_square_slope_median'],
-            rain_rate=self._obj['rainfall_rate_median'],
-            altitude=self._obj['platform_radar_altitude'],
-        )
+    # def correct_mss_for_rain(self):
+    #     #TODO: repeat for all mss obs (not just median)
+    #     mss_corrected = operations.correct_mss_for_rain(
+    #         mss_0=self._obj['sea_surface_mean_square_slope_median'],
+    #         rain_rate=self._obj['rainfall_rate_median'],
+    #         altitude=self._obj['platform_radar_altitude'],
+    #     )
 
-    self._obj['sea_surface_mean_square_slope_median'] = ((self.trajectory_dim), x_eye_rot)
+    #     self._obj['sea_surface_mean_square_slope_median'] = ((self.trajectory_dim), x_eye_rot)
     #TODO: return a new copy of the dataset
 
+    TimeLatLonNames = Tuple[str, str, str]
+    def colocate_with_path_ds(
+        self,
+        path_ds: xr.Dataset,
+        path_vars: List[str],
+        path_coords: TimeLatLonNames,
+        wsra_coords: TimeLatLonNames = ('time', 'longitude', 'latitude'),
+        temporal_tolerance: np.timedelta64 = np.timedelta64(30, 'm'),
+        spatial_tolerance: float = 50.0,  # km
+        prefix: str | None = None,
+    ) -> xr.Dataset:
+        """
+        Find and merge colocated observations from data defined along path
+        (i.e. a drifting buoy) based on temporal and spatial tolerances.
 
-    #TODO: colocatation methods?
+        The `path_vars` argument is a list of variable names along the
+        coordinates specified in `path_coords`.  These variables will be
+        merged into to a copy of the original WSRA Dataset. For instance, if
+        `significant_wave_height` and `mean_square_slope` are variables in
+        `path_ds` which are to be matched with `wsra_ds`, then `path_vars`
+        should be:
+
+        >>> path_vars = ['significant_wave_height', 'mean_square_slope']
+
+        Inputs `path_coords` and `wsra_coords` are tuples specifying the names
+        of the coordinates to match on. The names must be ordered as:
+        (time, longitude, latitude). For instance, if the path dataset
+        coordinates are labeled as 'time', 'lon', and 'lat', then `path_coords`
+        should be:
+
+        >>> path_coords = ('time', 'lon', 'lat')
+
+        `wsra_coords` defaults to the standard dataset names, though these
+        should be provided if the defaults have been modified.
+
+        Note: Empty matches (no colocated data) are still merged.
+
+        Args:
+            path_ds (xr.Dataset): path data
+            path_vars (List[str]): path variable names (see above)
+            path_coords (TimeLatLonNames): path coordinate names (see above)
+            wsra_coords (TimeLatLonNames): WSRA coordinate names (see above)
+            temporal_tolerance (np.timedelta64, optional): max time delta
+                between WSRA and path times. Defaults to 30 minutes.
+            spatial_tolerance (float, optional): max allowable distance
+                between WSRA and path times. Defaults to 5.0 km.
+
+        Returns:
+            xr.Dataset: A new Dataset created by merging `wsra_ds` with
+                colocated `path_vars`.
+        """
+        # Get the indices where the WSRA and path Datasets are colocated and
+        # use them to select the colocated portion of each Dataset.
+        wsra_indices, path_indices, distance, time_diff = colocate_with_path(
+            wsra_time=self._obj[wsra_coords[0]].values,
+            wsra_longitude=self._obj[wsra_coords[1]].values,
+            wsra_latitude=self._obj[wsra_coords[2]].values,
+            path_time=path_ds[path_coords[0]].values,
+            path_longitude=path_ds[path_coords[1]].values,
+            path_latitude=path_ds[path_coords[2]].values,
+            temporal_tolerance=temporal_tolerance,
+            spatial_tolerance=spatial_tolerance,
+        )
+        path_colocated_ds = path_ds.isel(time=path_indices)
+        wsra_colocated_ds = self._obj.isel(time=wsra_indices)
+
+        # Extract only `path_coords` and `path_vars` from the path Dataset and
+        # rename the coordinates for later merging.
+        path_subset_ds = path_colocated_ds[list(path_coords) + path_vars]
+        path_coord_name_dict = {path_coords[0]: 'time',
+                                path_coords[1]: 'longitude',
+                                path_coords[2]: 'latitude'}
+        path_subset_ds = path_subset_ds.rename(path_coord_name_dict)
+
+        # Assign the WSRA times and add the distance and time diff as vars.
+        path_subset_ds['time'] = wsra_colocated_ds['time']
+        path_subset_ds['distance'] = ('time', distance)
+        path_subset_ds['time_difference'] = ('time', time_diff) #TODO: add attrs
+
+        if prefix:
+            var_names = path_subset_ds.data_vars.keys()
+            name_dict = {name: prefix + '_' + name for name in var_names}
+            path_subset_ds = path_subset_ds.rename(name_dict)
+
+        wsra_merged_ds = xr.merge([self._obj, path_subset_ds])
+        return wsra_merged_ds
+
 
 @xr.register_dataarray_accessor("wsra")
 class WsraDataArrayAccessor:

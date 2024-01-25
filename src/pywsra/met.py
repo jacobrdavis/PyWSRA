@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+#TODO: incorporate tail radar data https://www.aoml.noaa.gov/ftp/pub/hrd/data/radar/level3/
 #TODO: could automate reading of met data using WSRA filename (or date) which
 # has the airplane identifier on it.
 def read_met_directory(
