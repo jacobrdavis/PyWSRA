@@ -40,19 +40,57 @@ def rotate_xy(
     return x_rot, y_rot
 
 
-def wn_spectrum_to_fq_dir_spectrum(  # spectrum_wavenumber_to_frequency
-    energy: xr.DataArray,
-    wavenumber_east: xr.DataArray,
-    wavenumber_north: xr.DataArray,
+
+    # if 'time' in energy.dims:
+    #     energy_reshaped = energy.transpose('wavenumber_east', 'wavenumber_north', 'time').values
+    # else:
+    #     energy_reshaped = energy.values[:, :, None]
+
+# xr.DataArray(
+#         data=energy_density_fq_dir,
+#         dims=["direction", "frequency", "time"],
+#     coords=dict(
+#         direction=direction,
+#         frequency=frequency,
+#         time=time,
+#     ),
+#     attrs=dict(
+#         description="Ambient temperature.",
+#         units="degC",
+#     ),
+# )
+
+def wn_spectrum_to_fq_dir_spectrum(
+    energy: np.ndarray,
+    wavenumber_east: np.ndarray,
+    wavenumber_north: np.ndarray,
     depth: float = 1000.0,  #TODO: np.inf?
     regrid: bool = True,
     directional_resolution: float = 1,  # deg
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """_summary_
 
-    if 'time' in energy.dims:
-        energy = energy.transpose('wavenumber_east', 'wavenumber_north', 'time').values
-    else:
-        energy = energy.values[:, :, None]
+    THIS IS DIFFERENT THAN STORED IN PYWSRA
+    INPUT ENERGY IS NOT A DENSITY
+    Note: if `energy` does not contain 3 dimensions, a new axis of size 1 is
+        added to represent `t`.
+
+    Args:
+        energy (np.ndarray): Wavenumber energy spectrum with shape (x, y, t)
+        wavenumber_east (np.ndarray): East wavenumbers with shape (x,)
+        wavenumber_north (np.ndarray): North wavenumbers with shape (y,)
+        depth (float, optional): Water depth. Defaults to 1000.0. TODO: should have shape t
+        directional_resolution (float, optional): Uniform directional spectrum
+            resolution to use if regridding. Defaults to 1 degree.
+
+    Returns:
+        Tuple containing
+        np.ndarray: Frequency-direction energy density spectrum with shape (d, f, t)
+        np.ndarray: Directions with shape (d,)
+        np.ndarray: Frequencies with shape (f,)
+    """
+    if energy.ndim < 3:
+        energy = energy[:, :, None]
 
     spectral_area = calculate_mean_spectral_area(wavenumber_east,  # rad^2/m^2
                                                  wavenumber_north)
@@ -60,14 +98,14 @@ def wn_spectrum_to_fq_dir_spectrum(  # spectrum_wavenumber_to_frequency
 
     if regrid:
         fq_dir_spectrum = _wn_spectrum_to_fq_dir_spectrum_regrid(
-            energy_density_wn=energy_density_wn,  #TODO: will need to move inside
-            wavenumber_east=wavenumber_east.values,
-            wavenumber_north=wavenumber_north.values,
+            energy_density_wn=energy_density_wn,
+            wavenumber_east=wavenumber_east,
+            wavenumber_north=wavenumber_north,
             depth=depth,
             directional_resolution=directional_resolution,
         )
 
-    else:  #TODO: need to test new implementation
+    else:
         fq_dir_spectrum = _wn_spectrum_to_fq_dir_spectrum_no_regrid(
             energy_density_wn=energy_density_wn,
             wavenumber_east=wavenumber_east,
@@ -76,8 +114,6 @@ def wn_spectrum_to_fq_dir_spectrum(  # spectrum_wavenumber_to_frequency
         )
 
     energy_density_fq_dir, direction, frequency = fq_dir_spectrum
-
-    xr.
 
     return energy_density_fq_dir, direction, frequency
 
@@ -113,7 +149,6 @@ def _wn_spectrum_to_fq_dir_spectrum_regrid(
                                                          wavenumber,
                                                          depth)
 
-    #TODO: need to re-transpose outputs
     fq_dir_spectrum_var = _calculate_fq_dir_spectrum_var(energy_density_fq_dir,
                                                          direction[:, 0],
                                                          frequency[0])
