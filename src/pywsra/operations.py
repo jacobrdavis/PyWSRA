@@ -12,6 +12,7 @@ __all__ = [
 from typing import Tuple
 
 import numpy as np
+import xarray as xr
 from scipy.interpolate import RegularGridInterpolator
 
 from . import waves
@@ -40,82 +41,126 @@ def rotate_xy(
 
 
 def wn_spectrum_to_fq_dir_spectrum(  # spectrum_wavenumber_to_frequency
-    energy: np.ndarray,
-    wavenumber_east: np.ndarray,
-    wavenumber_north: np.ndarray,
+    energy: xr.DataArray,
+    wavenumber_east: xr.DataArray,
+    wavenumber_north: xr.DataArray,
     depth: float = 1000.0,  #TODO: np.inf?
     regrid: bool = True,
-    directional_resolution: float = 1,
+    directional_resolution: float = 1,  # deg
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+
+    if 'time' in energy.dims:
+        energy = energy.transpose('wavenumber_east', 'wavenumber_north', 'time').values
+    else:
+        energy = energy.values[:, :, None]
 
     spectral_area = calculate_mean_spectral_area(wavenumber_east,  # rad^2/m^2
                                                  wavenumber_north)
     energy_density_wn = energy / spectral_area  # m^4/rad^2
 
     if regrid:
-        positive_wavenumber = wavenumber_north[wavenumber_north > 0]
-        angular_frequency_1d = waves.intrinsic_dispersion(positive_wavenumber)
+        fq_dir_spectrum = _wn_spectrum_to_fq_dir_spectrum_regrid(
+            energy_density_wn=energy_density_wn,  #TODO: will need to move inside
+            wavenumber_east=wavenumber_east.values,
+            wavenumber_north=wavenumber_north.values,
+            depth=depth,
+            directional_resolution=directional_resolution,
+        )
 
-        direction_1d = np.deg2rad(np.arange(0, 360 + directional_resolution, directional_resolution))
+    else:  #TODO: need to test new implementation
+        fq_dir_spectrum = _wn_spectrum_to_fq_dir_spectrum_no_regrid(
+            energy_density_wn=energy_density_wn,
+            wavenumber_east=wavenumber_east,
+            wavenumber_north=wavenumber_north,
+            depth=depth,
+        )
 
-        angular_frequency, direction = np.meshgrid(angular_frequency_1d,
-                                                   direction_1d)
-        frequency = angular_frequency / (2 * np.pi)
+    energy_density_fq_dir, direction, frequency = fq_dir_spectrum
 
-        wavenumber = waves.dispersion_solver(angular_frequency/(2*np.pi),
-                                             depth)
-        wavenumber_direction_x = wavenumber * np.cos(direction)
-        wavenumber_direction_y = wavenumber * np.sin(direction)
+    xr.
 
-        original_points = (wavenumber_east, wavenumber_north)
-        interpolation_points = (wavenumber_direction_x, wavenumber_direction_y)
-        interpolator = RegularGridInterpolator(original_points,
-                                               energy_density_wn)
-        energy_density_intp = interpolator(interpolation_points)
-        energy_density_fq = waves.wn_energy_to_fq_energy(energy_density_intp,
+    return energy_density_fq_dir, direction, frequency
+
+
+def _wn_spectrum_to_fq_dir_spectrum_regrid(
+    energy_density_wn: np.ndarray,
+    wavenumber_east: np.ndarray,
+    wavenumber_north: np.ndarray,
+    depth: float,
+    directional_resolution: float
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+
+    positive_wavenumber = wavenumber_north[wavenumber_north > 0]
+    angular_frequency_1d = waves.intrinsic_dispersion(positive_wavenumber)
+
+    direction_1d = np.deg2rad(np.arange(0, 360 + directional_resolution, directional_resolution))
+
+    angular_frequency, direction = np.meshgrid(angular_frequency_1d,
+                                               direction_1d)
+    frequency = angular_frequency / (2 * np.pi)
+
+    wavenumber = waves.dispersion_solver(angular_frequency/(2*np.pi),
+                                         depth)
+    wavenumber_direction_x = wavenumber * np.cos(direction)
+    wavenumber_direction_y = wavenumber * np.sin(direction)
+
+    original_points = (wavenumber_east, wavenumber_north)
+    interpolation_points = (wavenumber_direction_x, wavenumber_direction_y)
+    interpolator = RegularGridInterpolator(original_points,
+                                           energy_density_wn)
+    energy_density_intp = interpolator(interpolation_points)
+    energy_density_fq_dir = waves.wn_energy_to_fq_energy(energy_density_intp,
                                                          wavenumber,
                                                          depth)
 
-        fq_spectrum_var = _calculate_fq_spectrum_variance(energy_density_fq,
-                                                          direction[:, 0],
-                                                          frequency[0])
+    #TODO: need to re-transpose outputs
+    fq_dir_spectrum_var = _calculate_fq_dir_spectrum_var(energy_density_fq_dir,
+                                                         direction[:, 0],
+                                                         frequency[0])
 
-        wn_spectrum_var = _calculate_wn_spectrum_variance(energy_density_wn,
-                                                          wavenumber_east,
-                                                          wavenumber_north,
-                                                          blank_corners=True)
+    wn_spectrum_var = _calculate_wn_spectrum_var(energy_density_wn,
+                                                 wavenumber_east,
+                                                 wavenumber_north,
+                                                 blank_corners=True)
 
-        if not np.isclose(fq_spectrum_var, wn_spectrum_var, rtol=0.01):
-            raise ValueError(
-                f'Variance mismatch:'
-                f'Frequency spectrum variance is {fq_spectrum_var} m^2.'
-                f'Wavenumber spectrum variance is {wn_spectrum_var} m^2.'
-            )
+    if not np.allclose(fq_dir_spectrum_var, wn_spectrum_var, rtol=0.01):
+        raise ValueError(
+            f'Variance mismatch:'
+            f'Frequency spectrum variance is {fq_dir_spectrum_var} m^2.'
+            f'Wavenumber spectrum variance is {wn_spectrum_var} m^2.'
+        )
+    return energy_density_fq_dir, direction, frequency
 
-    else:
-        wavenumber, direction = calculate_wn_mag_and_dir(wavenumber_east,
-                                                         wavenumber_north)
-        direction = waves.trig_to_met(direction)
-        angular_frequency = waves.intrinsic_dispersion(wavenumber, depth)
-        frequency = angular_frequency / (2 * np.pi)
-        energy_density_fq = waves.wn_energy_to_fq_energy(energy_density_wn,
+
+def _wn_spectrum_to_fq_dir_spectrum_no_regrid(
+    energy_density_wn: np.ndarray,
+    wavenumber_east: np.ndarray,
+    wavenumber_north: np.ndarray,
+    depth: float,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    #TODO:
+    wavenumber, direction = calculate_wn_mag_and_dir(wavenumber_east,
+                                                     wavenumber_north)
+    direction = waves.trig_to_met(direction)
+    angular_frequency = waves.intrinsic_dispersion(wavenumber, depth)
+    frequency = angular_frequency / (2 * np.pi)
+    energy_density_fq_dir = waves.wn_energy_to_fq_energy(energy_density_wn,
                                                          wavenumber,
                                                          depth)
+    return energy_density_fq_dir, direction, frequency
 
-    return energy_density_fq, direction, frequency
 
-
-def _calculate_fq_spectrum_variance(
+def _calculate_fq_dir_spectrum_var(
     energy_density,
     direction,
     frequency,
 ):
     scalar_energy_density = np.trapz(energy_density, direction, axis=0)
-    variance = np.trapz(scalar_energy_density, frequency)
+    variance = np.trapz(scalar_energy_density, frequency, axis=0)
     return variance
 
 
-def _calculate_wn_spectrum_variance(
+def _calculate_wn_spectrum_var(
     energy_density,
     wavenumber_east,
     wavenumber_north,

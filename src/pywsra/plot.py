@@ -156,14 +156,20 @@ class WsraChart:
         if 'color' not in plt_kwargs and 'column' not in plt_kwargs:
             plt_kwargs['color'] = 'k'
 
-        if 'markersize' not in plt_kwargs:
-            plt_kwargs['markersize'] = 5
+        if 's' not in plt_kwargs:
+            plt_kwargs['s'] = 5
 
-        wsra_plot = self.gdf.plot(
-            ax=ax,
-            # transform=cartopy.crs.PlateCarree(),
-            **plt_kwargs,
+        wsra_plot = ax.scatter(
+            self.wsra_ds.longitude,
+            self.wsra_ds.latitude,
+            **plt_kwargs
         )
+        # self.wsra_ds
+        # wsra_plot = self.gdf.plot(
+        #     ax=ax,
+        #     # transform=cartopy.crs.PlateCarree(),
+        #     **plt_kwargs,
+        # )
         wsra_plot.set_zorder(6)
 
 

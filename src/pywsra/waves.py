@@ -237,7 +237,7 @@ def wn_energy_to_fq_energy(
     """
     dk_dw = 1 / intrinsic_group_velocity(wavenumber, depth)
     jacobian = wavenumber * dk_dw
-    return energy_density_wavenumber * jacobian * 2*np.pi
+    return energy_density_wavenumber * jacobian[:, :, None] * 2*np.pi  # [:, :, None]
 
 
 # For testing:

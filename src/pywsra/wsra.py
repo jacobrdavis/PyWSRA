@@ -435,6 +435,21 @@ class WsraDatasetAccessor:
         wsra_merged_ds = xr.merge([self._obj, path_subset_ds])
         return wsra_merged_ds
 
+    def wn_spectrum_to_fq_dir_spectrum(self):
+
+        #TODO: this needs to be applied as a ufunc I think? Or a loop but not good
+        fq_dir_spectrum = operations.wn_spectrum_to_fq_dir_spectrum(
+            energy=self._obj['directional_wave_spectrum'],
+            wavenumber_east=self._obj['wavenumber_east'],
+            wavenumber_north=self._obj['wavenumber_north'],
+            # depth float = 1000.0,  #TODO: np.inf?
+            regrid=True,
+            directional_resolution=1,
+        )
+        energy_density_fq, direction, frequency = fq_dir_spectrum
+
+        new_ds = self._obj.assign_coords({'frequency': frequency,
+                                          'direction': direction})
 
 @xr.register_dataarray_accessor("wsra")
 class WsraDataArrayAccessor:
