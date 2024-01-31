@@ -156,14 +156,20 @@ class WsraChart:
         if 'color' not in plt_kwargs and 'column' not in plt_kwargs:
             plt_kwargs['color'] = 'k'
 
-        if 'markersize' not in plt_kwargs:
-            plt_kwargs['markersize'] = 5
+        if 's' not in plt_kwargs:
+            plt_kwargs['s'] = 5
 
-        wsra_plot = self.gdf.plot(
-            ax=ax,
-            # transform=cartopy.crs.PlateCarree(),
-            **plt_kwargs,
+        wsra_plot = ax.scatter(
+            self.wsra_ds.longitude,
+            self.wsra_ds.latitude,
+            **plt_kwargs
         )
+        # self.wsra_ds
+        # wsra_plot = self.gdf.plot(
+        #     ax=ax,
+        #     # transform=cartopy.crs.PlateCarree(),
+        #     **plt_kwargs,
+        # )
         wsra_plot.set_zorder(6)
 
 
@@ -288,12 +294,10 @@ def plot_wavenumber_spectrum(
 
 
 def plot_frequency_dir_spectrum(
-    energy,
-    wavenumber_east,
-    wavenumber_north,
-    depth: float = 1000.0,  #TODO: np.inf?
-    normalize: bool = False,
-    ax = None, #TODO:
+    energy_density_fq_dir,  #TODO: update types
+    direction,
+    frequency,
+    ax = None,  # TODO:
     **pcm_kwargs,
 ):
     # see WSRA/backup/wsra_hurricane_ian
@@ -311,15 +315,16 @@ def plot_frequency_dir_spectrum(
     if 'shading' not in pcm_kwargs:
         pcm_kwargs['shading'] = 'gouraud'
 
-    energy_density_fq_dir, direction, frequency = wn_spectrum_to_fq_dir_spectrum(
-        energy,
-        wavenumber_east,
-        wavenumber_north,
-        depth,
-        regrid=False,
-    )
+    # #TODO: update: needs numpy input and energy transposition with move axis or input shapes defined
+    # energy_density_fq_dir, direction, frequency = wn_spectrum_to_fq_dir_spectrum(
+    #     energy,
+    #     wavenumber_east,
+    #     wavenumber_north,
+    #     depth,
+    #     regrid=False,
+    # )
 
-    pcm = ax.pcolormesh(direction, # (-direction_noregrid + np.pi/2) % (2 * np.pi),
+    pcm = ax.pcolormesh(direction,  # (-direction_noregrid + np.pi/2) % (2 * np.pi),
                         frequency,
                         energy_density_fq_dir,
                         **pcm_kwargs)

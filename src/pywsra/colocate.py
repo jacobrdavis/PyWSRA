@@ -53,6 +53,7 @@ def colocate_with_path(
 
     # Determine the time difference between WSRA and the path.
     time_difference = np.abs(wsra_time - path_time[t_sort_indices])
+    # time_difference = time_difference.astype('timedelta64[s]')
 
     # Determine the distance between WSRA and the path.
     distance, bearing = great_circle_pairwise(
