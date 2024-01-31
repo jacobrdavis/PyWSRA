@@ -336,8 +336,9 @@ class WsraDatasetAccessor:
         self.chart.plot(ax, **plt_kwargs)
         return ax
 
-
-    # def correct_mss_for_rain(self):
+    #TODO:
+    def correct_mss_for_rain(self):
+        pass
     #     #TODO: repeat for all mss obs (not just median)
     #     mss_corrected = operations.correct_mss_for_rain(
     #         mss_0=self._obj['sea_surface_mean_square_slope_median'],
@@ -426,15 +427,63 @@ class WsraDatasetAccessor:
         path_subset_ds['time'] = wsra_colocated_ds['time']
         path_subset_ds['distance'] = ('time', distance)
         path_subset_ds['time_difference'] = ('time', time_diff) #TODO: add attrs
+        path_subset_ds['time_difference'] = path_subset_ds['time_difference'].astype('timedelta64[s]')
 
+        #TODO: should make sure 'time' is first in axis
         if prefix:
+            dim_names = list(path_subset_ds.dims.keys())
+            dim_name_dict = {name: prefix + '_' + name for name in dim_names if name != 'time'}
+            path_subset_ds = path_subset_ds.rename(dim_name_dict)
+
             var_names = path_subset_ds.data_vars.keys()
-            name_dict = {name: prefix + '_' + name for name in var_names}
-            path_subset_ds = path_subset_ds.rename(name_dict)
+            var_name_dict = {name: prefix + '_' + name for name in var_names}
+            path_subset_ds = path_subset_ds.rename(var_name_dict)
 
         wsra_merged_ds = xr.merge([self._obj, path_subset_ds])
         return wsra_merged_ds
 
+    def wn_spectrum_to_fq_dir_spectrum(self, regrid: bool = True, **kwargs):
+
+        energy = (self._obj['directional_wave_spectrum']
+                  .transpose('wavenumber_east', 'wavenumber_north', 'time'))
+        #TODO: missing_dims ignore or warn ^ what will happen when a single time array is provided?
+        fq_dir_spectrum = operations.wn_spectrum_to_fq_dir_spectrum(
+            energy=energy.values,
+            wavenumber_east=self._obj['wavenumber_east'].values,
+            wavenumber_north=self._obj['wavenumber_north'].values,
+            regrid=regrid,
+            # depth float = 1000.0,  #TODO: check if depth in vars
+            **kwargs,
+        )
+        energy_density_fq, direction, frequency = fq_dir_spectrum
+
+        energy_density_fq_reshaped = np.moveaxis(energy_density_fq, -1, 0)
+
+        if regrid:
+            direction_1d = direction[:, 0]
+            frequency_1d = frequency[0]
+            new_ds = self._obj.assign_coords({'frequency': frequency_1d,
+                                              'direction': direction_1d})
+            dims = ('time', 'direction', 'frequency')
+            new_ds['frequency_direction_wave_spectrum'] = (dims, energy_density_fq_reshaped)
+            #TODO: add attrs
+        else:
+            dims = ('time', 'wavenumber_east', 'wavenumber_north')
+            new_ds = self._obj.assign({
+                'frequency_direction_wave_spectrum': (dims, energy_density_fq_reshaped),
+                'direction': (dims[1:], direction),
+                'frequency': (dims[1:], frequency),
+            })
+            #TODO: add attrs
+        return new_ds
+
+    def fq_dir_spectrum_to_fq_spectrum(self):
+        fq_dir_spectrum = self._obj['frequency_direction_wave_spectrum']
+        fq_spectrum = fq_dir_spectrum.integrate(coord='direction')
+        new_ds = self._obj.assign({
+            'frequency_wave_spectrum': fq_spectrum,
+        })
+        return new_ds
 
 @xr.register_dataarray_accessor("wsra")
 class WsraDataArrayAccessor:
