@@ -10,6 +10,7 @@ __all__ = [
 ]
 
 from typing import Tuple
+from warnings import warn
 
 import numpy as np
 import xarray as xr
@@ -40,31 +41,12 @@ def rotate_xy(
     return x_rot, y_rot
 
 
-
-    # if 'time' in energy.dims:
-    #     energy_reshaped = energy.transpose('wavenumber_east', 'wavenumber_north', 'time').values
-    # else:
-    #     energy_reshaped = energy.values[:, :, None]
-
-# xr.DataArray(
-#         data=energy_density_fq_dir,
-#         dims=["direction", "frequency", "time"],
-#     coords=dict(
-#         direction=direction,
-#         frequency=frequency,
-#         time=time,
-#     ),
-#     attrs=dict(
-#         description="Ambient temperature.",
-#         units="degC",
-#     ),
-# )
-
 def wn_spectrum_to_fq_dir_spectrum(
     energy: np.ndarray,
     wavenumber_east: np.ndarray,
     wavenumber_north: np.ndarray,
     depth: float = 1000.0,  #TODO: np.inf?
+    var_rtol: float = 0.02,
     regrid: bool = True,
     directional_resolution: float = 1,  # deg
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -74,24 +56,44 @@ def wn_spectrum_to_fq_dir_spectrum(
     INPUT ENERGY IS NOT A DENSITY
     Note: if `energy` does not contain 3 dimensions, a new axis of size 1 is
         added to represent `t`.
+    The returned arrays are gridded (direction increases along axis 0 and
+    repeats along axis 1; frequency increases along axis 1 and repeats along
+    axis 0).
+    #TODO: describe regrid.
+    `var_rtol` is computed as abs(`fq_var` - `wn_var`) / abs(`wn_var`) where
+    `wn_var` and `fq_var` are the wavenumber and frequency spectra variances,
+    respectively.  This value is also for `rtol` in np.allclose(...).
 
     Args:
         energy (np.ndarray): Wavenumber energy spectrum with shape (x, y, t)
         wavenumber_east (np.ndarray): East wavenumbers with shape (x,)
         wavenumber_north (np.ndarray): North wavenumbers with shape (y,)
         depth (float, optional): Water depth. Defaults to 1000.0. TODO: should have shape t
+        var_rtol (float, optional): Relative tolerance (see notes) between
+            wavenumber and frequency spectrum variance.  Defaults to 0.02.
+        regrid (bool, optional): If True, regrid the output spectra onto
+            uniform directions and frequencies. Defaults to True.
         directional_resolution (float, optional): Uniform directional spectrum
             resolution to use if regridding. Defaults to 1 degree.
 
     Returns:
-        Tuple containing
+        If `regrid` == `True`, a Tuple containing
         np.ndarray: Frequency-direction energy density spectrum with shape (d, f, t)
-        np.ndarray: Directions with shape (d,)
-        np.ndarray: Frequencies with shape (f,)
+        np.ndarray: Gridded directions with shape (d, f)
+        np.ndarray: Gridded frequencies with shape (d, f)
+
+        Otherwise, if `regrid` == `False`, a Tuple containing
+        np.ndarray: Frequency-direction energy density spectrum with shape (x, y, t)
+        np.ndarray: Gridded directions with shape (x, y)
+        np.ndarray: Gridded frequencies with shape (x, y)
+
     """
+    # Require shape (d, f, t).  Create a new axis to represent `t` if `energy`
+    # is only 2D.
     if energy.ndim < 3:
         energy = energy[:, :, None]
 
+    # Convert energy to energy density.
     spectral_area = calculate_mean_spectral_area(wavenumber_east,  # rad^2/m^2
                                                  wavenumber_north)
     energy_density_wn = energy / spectral_area  # m^4/rad^2
@@ -103,6 +105,7 @@ def wn_spectrum_to_fq_dir_spectrum(
             wavenumber_north=wavenumber_north,
             depth=depth,
             directional_resolution=directional_resolution,
+            var_rtol=var_rtol,
         )
 
     else:
@@ -123,8 +126,10 @@ def _wn_spectrum_to_fq_dir_spectrum_regrid(
     wavenumber_east: np.ndarray,
     wavenumber_north: np.ndarray,
     depth: float,
-    directional_resolution: float
+    directional_resolution: float,
+    var_rtol: float = 0.02,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """ """
 
     positive_wavenumber = wavenumber_north[wavenumber_north > 0]
     angular_frequency_1d = waves.intrinsic_dispersion(positive_wavenumber)
@@ -158,11 +163,26 @@ def _wn_spectrum_to_fq_dir_spectrum_regrid(
                                                  wavenumber_north,
                                                  blank_corners=True)
 
-    if not np.allclose(fq_dir_spectrum_var, wn_spectrum_var, rtol=0.01):
-        raise ValueError(
-            f'Variance mismatch:'
-            f'Frequency spectrum variance is {fq_dir_spectrum_var} m^2.'
-            f'Wavenumber spectrum variance is {wn_spectrum_var} m^2.'
+    if not np.allclose(fq_dir_spectrum_var, wn_spectrum_var,
+                       rtol=var_rtol, equal_nan=True):
+        perc_err = _var_error(fq_dir_spectrum_var, wn_spectrum_var)
+
+        # Reject results where the percent error on variance is less than the
+        # specified tolerance, `var_rtol`. Values are replaced by an array of
+        # NaNs of the same size. #TODO: will want to do this for regrid=False
+        valid_var = perc_err < var_rtol * 100
+        energy_density_fq_dir = np.where(valid_var,
+                                         energy_density_fq_dir,
+                                         np.NaN)
+
+        # Warn about the variance mismatch. Omit percent errors that are NaNs.
+        num_invalid_var = np.sum(~valid_var)
+        perc_err_notnan = perc_err[~np.isnan(perc_err)]
+        max_err = perc_err_notnan.max().round(2)
+        warn(
+            f'Variance mismatch in {num_invalid_var} values: '
+            f'maximum percent error between frequency and wavenumber '
+            f'spectra variance is {max_err}%.'
         )
     return energy_density_fq_dir, direction, frequency
 
@@ -173,7 +193,6 @@ def _wn_spectrum_to_fq_dir_spectrum_no_regrid(
     wavenumber_north: np.ndarray,
     depth: float,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    #TODO:
     wavenumber, direction = calculate_wn_mag_and_dir(wavenumber_east,
                                                      wavenumber_north)
     direction = waves.trig_to_met(direction)
@@ -209,6 +228,10 @@ def _calculate_wn_spectrum_var(
     energy_density_north = np.trapz(energy_density, wavenumber_east, axis=0)
     variance = np.trapz(energy_density_north, wavenumber_north, axis=0)
     return variance
+
+
+def _var_error(estimated_var, actual_var):
+    return np.abs(estimated_var - actual_var) / np.abs(actual_var) * 100
 
 
 def _blank_wn_spectrum_corners(
